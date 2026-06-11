@@ -2,6 +2,7 @@
    各页面图表初始化与更新 */
 
 /* ── helper ── */
+function escapeHtml(str){return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;')}
 function initChart(id){
   if(chartInstances[id])return chartInstances[id];
   const el=document.getElementById(id);
@@ -199,13 +200,13 @@ function initProducts(){
     const summary=summaries[p.name]?summaries[p.name].summary:'';
     const cleanSummary=summary.replace(/^\d+\.\s*/gm,'').replace(/\*\*/g,'').substring(0,120);
     card.innerHTML=`
-      <div class="pname">${p.name}</div>
+      <div class="pname">${escapeHtml(p.name)}</div>
       <div class="pstats">
         <span>📊 ${p.total.toLocaleString()} 条数据</span>
         <span>⭐ ${p.avg_rating}</span>
         <span>🏅 ${p.five_star_pct}% 五星</span>
       </div>
-      <div class="psummary">${cleanSummary||'摘要生成中...'}</div>
+      <div class="psummary">${escapeHtml(cleanSummary)||'摘要生成中...'}</div>
       <div class="pbar"><div class="pbar-fill" style="width:${(p.total/D.product_ranking[0].total*100)}%"></div></div>`;
     card.addEventListener('click',()=>showProductModal(p.name));
     grid.appendChild(card);
@@ -256,7 +257,7 @@ function showProductModal(name){
     </div>
     <div class="card" style="margin-bottom:16px">
       <div class="card-title">AI 产品口碑摘要</div>
-      <p style="font-size:13px;line-height:1.8;color:var(--text-dim)">${(info.summary||'摘要生成中...').replace(/\n/g,'<br>')}</p>
+      <p style="font-size:13px;line-height:1.8;color:var(--text-dim)">${escapeHtml(info.summary||'摘要生成中...').replace(/\n/g,'<br>')}</p>
     </div>
     <div class="row">
       <div class="col"><div class="card"><div class="card-title">月度趋势</div><div class="chart-box" id="modalChart1" style="height:250px"></div></div></div>
@@ -498,7 +499,7 @@ function initDiagnosis(){
         <p style="margin-bottom:12px">差评核心关键词 TOP 10</p>
         ${negWords.slice(0,10).map((w,i)=>`
           <div class="review-item negative" style="text-align:left;display:flex;justify-content:space-between">
-            <span>#${i+1} ${w.name}</span><span style="color:var(--negative)">${w.value} 次</span>
+            <span>#${i+1} ${escapeHtml(w.name)}</span><span style="color:var(--negative)">${w.value} 次</span>
           </div>`).join('')}
         <p style="margin-top:12px;color:var(--text-muted);font-size:10px">完整差评内容请在情感洞察页面查看</p>
       </div>`;
