@@ -1,23 +1,40 @@
-# MySQL数据库配置
+"""
+项目配置文件
+支持通过环境变量覆盖默认值（.env 文件自动加载）
+"""
 import os
+from dotenv import load_dotenv
 
+load_dotenv()
+
+# 项目根目录
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# ============================================================
+# 数据库配置
+# ============================================================
 DB_CONFIG = {
-    'host': 'localhost',
-    'port': 3306,
-    'user': 'root',
-    'password': os.getenv('MYSQL_PASSWORD', ''),  # 从环境变量读取
-    'database': 'russia_ecommerce',
-    'charset': 'utf8mb4'
+    "host": os.getenv("MYSQL_HOST", "localhost"),
+    "port": int(os.getenv("MYSQL_PORT", "3306")),
+    "user": os.getenv("MYSQL_USER", "root"),
+    "password": os.getenv("MYSQL_PASSWORD", ""),
+    "database": os.getenv("MYSQL_DATABASE", "russia_ecommerce"),
+    "charset": "utf8mb4",
 }
 
-# 原始数据文件路径
+# ============================================================
+# 原始数据文件路径（相对于项目根目录）
+# ============================================================
 DATA_PATHS = {
     "ozon_reviews": [
         "原始数据/ozon_reviews.xlsx",
         "原始数据/ozon_reviews1.xlsx",
         "原始数据/ozon_reviews2.xlsx",
     ],
-    "ozon_questions": ["原始数据/ozon_questions.xlsx", "原始数据/ozon_questions2.xlsx"],
+    "ozon_questions": [
+        "原始数据/ozon_questions.xlsx",
+        "原始数据/ozon_questions2.xlsx",
+    ],
     "wildberries_reviews": [
         "原始数据/wildberries_reviews.xlsx",
         "原始数据/wildberries_reviews1.xlsx",
@@ -31,3 +48,43 @@ DATA_PATHS = {
         "原始数据/wildberries_qa3.xlsx",
     ],
 }
+
+# 商品链接 Excel（爬虫用）
+PRODUCT_URLS_EXCEL = os.getenv(
+    "PRODUCT_URLS_EXCEL",
+    os.path.join(PROJECT_ROOT, "Rusisa_new_20260130_all.xlsx"),
+)
+
+# ============================================================
+# 翻译后数据文件
+# ============================================================
+MERGED_TRANSLATED_CSV = os.path.join(PROJECT_ROOT, "merged_data_translated.csv")
+MERGED_TRANSLATED_XLSX = os.path.join(PROJECT_ROOT, "merged_data_translated.xlsx")
+
+# ============================================================
+# 火山引擎翻译 API 配置（token 留空，使用前需填写）
+# ============================================================
+VOLC_ACCESS_KEY = os.getenv("VOLC_ACCESS_KEY", "")
+VOLC_SECRET_KEY = os.getenv("VOLC_SECRET_KEY", "")
+# 火山引擎翻译 API 端点
+VOLC_TRANSLATE_URL = "https://translate.volcengine.com/api/v1/translate"
+VOLC_TRANSLATE_BATCH_SIZE = int(os.getenv("VOLC_TRANSLATE_BATCH_SIZE", "50"))
+
+# ============================================================
+# DeepSeek V4 Flash API 配置（token 留空，使用前需填写）
+# ============================================================
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+DEEPSEEK_API_URL = os.getenv(
+    "DEEPSEEK_API_URL", "https://api.deepseek.com"
+)
+# 分析批处理大小（每次调用分析多少条）
+ANALYSIS_BATCH_SIZE = int(os.getenv("ANALYSIS_BATCH_SIZE", "100"))
+# 分析模型名称
+DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+
+# ============================================================
+# 输出目录
+# ============================================================
+OUTPUT_DIR = os.getenv("OUTPUT_DIR", os.path.join(PROJECT_ROOT, "output"))
+DASHBOARD_DIR = os.path.join(PROJECT_ROOT, "src", "dashboard")
+DASHBOARD_DATA_JS = os.path.join(DASHBOARD_DIR, "dashboard_data.js")

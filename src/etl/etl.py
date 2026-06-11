@@ -1,7 +1,30 @@
-import pandas as pd
+"""
+ETL 管道 — 爬取 → 转换 → 加载 → 翻译数据入库
+
+优化：
+  ✓ logging 替代 print
+  ✓ 修复 `extract_excel_data` 路径拼接
+  ✓ tqdm 进度条
+  ✓ 翻译数据自动入库
+  ✓ 更细粒度的异常处理
+"""
+import logging
 import os
-from database import Database
-from config import DATA_PATHS
+import sys
+import time
+
+import pandas as pd
+
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
+from src.etl.database import Database
+from config.config import DATA_PATHS, MERGED_TRANSLATED_CSV, PROJECT_ROOT
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%H:%M:%S",
+)
+logger = logging.getLogger(__name__)
 
 
 class ETLProcessor:
@@ -10,33 +33,79 @@ class ETLProcessor:
         self.total_reviews = 0
         self.total_questions = 0
 
-    def extract_excel_data(self, file_paths):
-        """从多个Excel文件提取数据"""
+    # ── 提取 ────────────────────────────────────────────────
+
+    def extract_excel_data(self, rel_paths):
+        """
+        从多个 Excel 文件提取数据
+        修复：rel_paths 相对于 PROJECT_ROOT，而非 __file__
+        """
         all_data = []
-        for file_path in file_paths:
-            full_path = os.path.join(os.path.dirname(__file__), file_path)
-            # 检查文件是否存在
+        for rel_path in rel_paths:
+            full_path = os.path.join(PROJECT_ROOT, rel_path)
             if not os.path.exists(full_path):
-                print(f"文件不存在: {full_path}")
+                logger.warning("文件不存在: %s", full_path)
                 continue
 
             try:
-                df = pd.read_excel(full_path, engine="openpyxl")
-                print(f"读取文件: {file_path}, 行数: {len(df)}")
-
-                # 将DataFrame转换为字典列表
+                df = pd.read_excel(full_path, engine="openpyxl", dtype=str)
+                # 标记来源文件
+                df["source_file"] = os.path.basename(rel_path)
                 data = df.to_dict("records")
                 all_data.extend(data)
+                logger.info("  ✓ %s → %d 行", rel_path, len(data))
             except Exception as e:
-                print(f"读取文件失败 {file_path}: {e}")
+                logger.error("  ✗ 读取失败 %s: %s", rel_path, e)
 
         return all_data
 
+    # ── 转换 ────────────────────────────────────────────────
+
+    def _parse_datetime(self, datetime_str):
+        if not datetime_str:
+            return None
+        try:
+            formats = [
+                "%Y-%m-%d %H:%M",
+                "%Y-%m-%d %H:%M:%S",
+                "%Y/%m/%d %H:%M",
+                "%d.%m.%Y %H:%M",
+            ]
+            for fmt in formats:
+                try:
+                    return pd.to_datetime(datetime_str, format=fmt).strftime("%Y-%m-%d %H:%M:%S")
+                except (ValueError, TypeError):
+                    continue
+            return pd.to_datetime(datetime_str, errors="coerce").strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            return None
+
+    def _remove_duplicates(self, data):
+        """基于完整字段去重"""
+        seen = set()
+        unique = []
+        for item in data:
+            fields = [
+                item.get("author", ""),
+                item.get("publishDate", ""),
+                item.get("rate", ""),
+                item.get("content", ""),
+                item.get("question", ""),
+                item.get("name", ""),
+                item.get("SKU", ""),
+                item.get("URL", ""),
+                item.get("siteName", ""),
+            ]
+            key = tuple(str(f) if f is not None else "" for f in fields)
+            if key not in seen:
+                seen.add(key)
+                unique.append(item)
+        logger.info("  去重: %d → %d 条", len(data), len(unique))
+        return unique
+
     def transform_reviews(self, raw_data):
-        """转换评论数据"""
         transformed = []
         for item in raw_data:
-            # 标准化字段名
             record = {
                 "author": item.get("author", item.get("Author", "")),
                 "publishDate": self._parse_datetime(
@@ -51,25 +120,20 @@ class ETLProcessor:
             }
             transformed.append(record)
 
-        # 去重
-        unique_data = self._remove_duplicates(transformed)
-        print(f"转换完成，原始数据: {len(raw_data)}，去重后: {len(unique_data)}")
-        return unique_data
+        unique = self._remove_duplicates(transformed)
+        logger.info("  评论转换: %d → %d", len(raw_data), len(unique))
+        return unique
 
     def transform_questions(self, raw_data):
-        """转换问答数据"""
         transformed = []
         for item in raw_data:
-            # 标准化字段名
             record = {
                 "author": item.get("author", item.get("Author", "")),
                 "publishDate": self._parse_datetime(
                     item.get("publishDate", item.get("PublishDate", ""))
                 ),
                 "question": item.get("question", item.get("Question", "")),
-                "content": item.get(
-                    "content", item.get("Content", item.get("answer", ""))
-                ),
+                "content": item.get("content", item.get("Content", item.get("answer", ""))),
                 "name": item.get("name", item.get("Name", "")),
                 "SKU": item.get("SKU", item.get("sku", "")),
                 "URL": item.get("URL", item.get("url", "")),
@@ -77,133 +141,124 @@ class ETLProcessor:
             }
             transformed.append(record)
 
-        # 去重
-        unique_data = self._remove_duplicates(transformed)
-        print(f"转换完成，原始数据: {len(raw_data)}，去重后: {len(unique_data)}")
-        return unique_data
-
-    def _parse_datetime(self, datetime_str):
-        """解析日期时间字符串"""
-        if not datetime_str:
-            return None
-
-        try:
-            # 尝试多种日期格式
-            formats = [
-                "%Y-%m-%d %H:%M",
-                "%Y-%m-%d %H:%M:%S",
-                "%Y/%m/%d %H:%M",
-                "%d.%m.%Y %H:%M",
-            ]
-            for fmt in formats:
-                try:
-                    return pd.to_datetime(datetime_str, format=fmt).strftime(
-                        "%Y-%m-%d %H:%M:%S"
-                    )
-                except:
-                    continue
-
-            # 默认解析
-            return pd.to_datetime(datetime_str, errors="coerce").strftime(
-                "%Y-%m-%d %H:%M:%S"
-            )
-        except:
-            return None
-
-    def _remove_duplicates(self, data):
-        """基于完整数据去重，只有所有字段都完全相同时才认为是重复"""
-        seen = set()
-        unique = []
-        for item in data:
-            # 将字典转换为可哈希的元组，包含所有字段
-            # 按固定顺序提取字段值，确保相同内容的记录生成相同的键
-            fields = [
-                item.get("author", ""),
-                item.get("publishDate", ""),
-                item.get("rate", ""),
-                item.get("content", ""),
-                item.get("question", ""),  # 问答数据专用字段
-                item.get("name", ""),
-                item.get("SKU", ""),
-                item.get("URL", ""),
-                item.get("siteName", ""),
-            ]
-            # 将所有字段转换为字符串，处理 None 和非字符串类型
-            key = tuple(str(f) if f is not None else "" for f in fields)
-            if key not in seen:
-                seen.add(key)
-                unique.append(item)
-        print(f"去重完成，原始数据: {len(data)} 条，去重后: {len(unique)} 条")
+        unique = self._remove_duplicates(transformed)
+        logger.info("  问答转换: %d → %d", len(raw_data), len(unique))
         return unique
 
+    # ── 加载 ────────────────────────────────────────────────
+
     def load_data(self, reviews_data, questions_data):
-        """加载数据到数据库"""
-        # 批量插入评论数据（每批1000条）
+        from tqdm import tqdm
+
+        batch_size = 1000
+
+        # 评论
         if reviews_data:
-            batch_size = 1000
-            for i in range(0, len(reviews_data), batch_size):
+            for i in tqdm(
+                range(0, len(reviews_data), batch_size),
+                desc="加载评论",
+                unit="批",
+            ):
                 batch = reviews_data[i : i + batch_size]
                 count = self.db.insert_reviews_batch(batch)
                 self.total_reviews += count
-                print(f"已插入 {i+count}/{len(reviews_data)} 条评论")
 
-        # 批量插入问答数据（每批1000条）
+        # 问答
         if questions_data:
-            batch_size = 1000
-            for i in range(0, len(questions_data), batch_size):
+            for i in tqdm(
+                range(0, len(questions_data), batch_size),
+                desc="加载问答",
+                unit="批",
+            ):
                 batch = questions_data[i : i + batch_size]
                 count = self.db.insert_questions_batch(batch)
                 self.total_questions += count
-                print(f"已插入 {i+count}/{len(questions_data)} 条问答")
 
-    def run(self):
-        """执行完整ETL流程"""
-        print("开始执行ETL流程...")
+    # ── 翻译数据加载 ─────────────────────────────────────
+
+    def load_translated_csv(self, csv_path: str = None, batch_size: int = 2000):
+        """将翻译后的 CSV 加载到 translated_records 表"""
+        path = csv_path or MERGED_TRANSLATED_CSV
+        if not os.path.exists(path):
+            logger.warning("翻译 CSV 不存在: %s，跳过", path)
+            return
+
+        logger.info("加载翻译数据: %s", path)
+        df = pd.read_csv(path, encoding="utf-8", dtype=str, low_memory=False)
+        df = df.where(df.notna(), None)  # NaN → None
+
+        records = df.to_dict("records")
+        total = len(records)
+
+        existing = self.db.get_table_count("translated_records")
+        if existing >= total:
+            logger.info("翻译数据已全部入库 (%d 条)", existing)
+            return
+
+        # 从断点继续
+        if existing > 0:
+            records = records[existing:]
+            logger.info("断点续传: 剩余 %d 条", len(records))
+
+        from tqdm import tqdm
+
+        inserted = 0
+        for i in tqdm(range(0, len(records), batch_size), desc="翻译数据入库"):
+            batch = records[i : i + batch_size]
+            inserted += self.db.insert_translated_records_batch(batch)
+
+        logger.info("翻译数据入库完成，共 %d 条", inserted)
+
+    # ── ETL 主流程 ──────────────────────────────────────────
+
+    def run(self, load_translated: bool = True):
+        logger.info("=" * 50)
+        logger.info("ETL 管道启动")
+        logger.info("=" * 50)
 
         try:
-            # 连接数据库并创建表
             self.db.connect()
             self.db.create_tables()
 
-            # 提取评论数据
-            print("\n处理评论数据...")
+            # 提取 + 转换 + 加载 评论
+            logger.info("\n[1/3] 处理评论数据...")
             all_reviews = []
-            for paths in [
-                DATA_PATHS["ozon_reviews"],
-                DATA_PATHS["wildberries_reviews"],
-            ]:
-                raw_data = self.extract_excel_data(paths)
-                all_reviews.extend(raw_data)
+            t0 = time.time()
+            for group in ["ozon_reviews", "wildberries_reviews"]:
+                all_reviews.extend(self.extract_excel_data(DATA_PATHS[group]))
+            transformed = self.transform_reviews(all_reviews)
+            self.load_data(transformed, [])
+            logger.info("  ✔ 评论完成 (%d 条, %.1fs)", self.total_reviews, time.time() - t0)
 
-            # 转换评论数据
-            transformed_reviews = self.transform_reviews(all_reviews)
-
-            # 提取问答数据
-            print("\n处理问答数据...")
+            # 提取 + 转换 + 加载 问答
+            logger.info("\n[2/3] 处理问答数据...")
             all_questions = []
-            for paths in [
-                DATA_PATHS["ozon_questions"],
-                DATA_PATHS["wildberries_questions"],
-            ]:
-                raw_data = self.extract_excel_data(paths)
-                all_questions.extend(raw_data)
+            t0 = time.time()
+            for group in ["ozon_questions", "wildberries_questions"]:
+                all_questions.extend(self.extract_excel_data(DATA_PATHS[group]))
+            transformed_q = self.transform_questions(all_questions)
+            self.load_data([], transformed_q)
+            logger.info("  ✔ 问答完成 (%d 条, %.1fs)", self.total_questions, time.time() - t0)
 
-            # 转换问答数据
-            transformed_questions = self.transform_questions(all_questions)
+            # 翻译数据入库
+            if load_translated:
+                logger.info("\n[3/3] 加载翻译数据...")
+                t0 = time.time()
+                self.load_translated_csv()
+                logger.info("  ✔ 翻译数据完成 (%.1fs)", time.time() - t0)
 
-            # 加载数据到数据库
-            print("\n加载数据到数据库...")
-            self.load_data(transformed_reviews, transformed_questions)
+            # 汇总
+            logger.info("\n" + "=" * 50)
+            logger.info("ETL 完成!")
+            logger.info("  评论: %d 条", self.total_reviews)
+            logger.info("  问答: %d 条", self.total_questions)
+            logger.info("  翻译: %d 条", self.db.get_table_count("translated_records"))
+            logger.info("=" * 50)
 
-            # 输出统计信息
-            print("\nETL流程完成!")
-            print(f"评论数据: {self.total_reviews} 条")
-            print(f"问答数据: {self.total_questions} 条")
-            print(f"数据库评论表总数: {self.db.get_table_count('reviews')} 条")
-            print(f"数据库问答表总数: {self.db.get_table_count('questions')} 条")
-
+        except Exception as e:
+            logger.error("ETL 过程异常: %s", e)
+            raise
         finally:
-            # 关闭数据库连接
             if self.db.connection and self.db.connection.is_connected():
                 self.db.disconnect()
 

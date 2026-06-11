@@ -23,6 +23,12 @@ __pycache__/
 *.swo
 *~
 
+# 翻译进度文件
+.translate_progress.json
+
+# 输出目录
+output/
+
 # 日志文件
 *.log
 
