@@ -9,7 +9,6 @@
 
 **项目地址**：[http://116.62.152.97/](http://116.62.152.97/)
 
-> 部署在阿里云 ECS（2核2GiB，华东1），使用 Nginx + MySQL 提供访问
 
 ---
 
@@ -162,7 +161,6 @@ export DEEPSEEK_API_KEY=sk-your-deepseek-api-key
 
 ### 安全说明
 
-⚠️ `.env` 文件已配置 `.gitignore` 规则，**不会提交到代码仓库**。  
 所有密码和 API Key 仅从环境变量读取，`config.py` 中无硬编码密钥。
 
 ---
