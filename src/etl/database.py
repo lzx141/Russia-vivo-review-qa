@@ -107,12 +107,97 @@ class Database:
     # ════════════════════════════════════════════════════════════
 
     def create_tables(self):
-        """创建所有表（幂等）"""
+        """创建所有表（幂等） — 含星型模型维度表"""
         self._create_reviews_table()
         self._create_questions_table()
         self._create_translated_records_table()
         self._create_analysis_cache_table()
-        logger.info("所有表创建/验证完毕")
+        self._create_dim_product_table()
+        self._create_dim_platform_table()
+        self._create_dim_date_table()
+        self._create_etl_stats_table()
+        logger.info("所有表创建/验证完毕（含维度表 + ETL 监控）")
+
+    # ── 维度表：产品 ────────────────────────────────────────
+
+    def _create_dim_product_table(self):
+        """产品维度表（星型模型）"""
+        sql = """
+        CREATE TABLE IF NOT EXISTS dim_product (
+            product_id INT AUTO_INCREMENT PRIMARY KEY,
+            product_name VARCHAR(255) NOT NULL COMMENT '产品名称',
+            sku VARCHAR(255) DEFAULT NULL COMMENT 'SKU',
+            brand VARCHAR(100) DEFAULT 'vivo' COMMENT '品牌',
+            category VARCHAR(100) DEFAULT '智能手机' COMMENT '产品类别',
+            price_range VARCHAR(50) DEFAULT NULL COMMENT '价格区间',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY uk_product_sku (product_name, sku),
+            INDEX idx_product_name (product_name)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        """
+        self.execute_query(sql)
+
+    # ── 维度表：平台 ────────────────────────────────────────
+
+    def _create_dim_platform_table(self):
+        """平台维度表（星型模型）"""
+        sql = """
+        CREATE TABLE IF NOT EXISTS dim_platform (
+            platform_id INT AUTO_INCREMENT PRIMARY KEY,
+            platform_name VARCHAR(50) NOT NULL COMMENT '平台名称',
+            platform_type VARCHAR(50) DEFAULT 'ecommerce' COMMENT '平台类型',
+            country VARCHAR(50) DEFAULT '俄罗斯' COMMENT '所属国家',
+            url_template TEXT DEFAULT NULL COMMENT 'URL 模板',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY uk_platform_name (platform_name)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        """
+        self.execute_query(sql)
+
+    # ── 维度表：时间 ────────────────────────────────────────
+
+    def _create_dim_date_table(self):
+        """时间维度表（星型模型 — 支持按年/季/月/周聚合）"""
+        sql = """
+        CREATE TABLE IF NOT EXISTS dim_date (
+            date_id INT AUTO_INCREMENT PRIMARY KEY,
+            full_date DATE NOT NULL COMMENT '完整日期',
+            year INT NOT NULL COMMENT '年份',
+            quarter INT NOT NULL COMMENT '季度 (1-4)',
+            month INT NOT NULL COMMENT '月份 (1-12)',
+            week INT NOT NULL COMMENT '年内第几周',
+            day_of_week INT NOT NULL COMMENT '周几 (1=周一)',
+            is_weekend BOOLEAN DEFAULT FALSE COMMENT '是否周末',
+            UNIQUE KEY uk_full_date (full_date)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        """
+        self.execute_query(sql)
+
+    # ── ETL 监控表 ───────────────────────────────────────────
+
+    def _create_etl_stats_table(self):
+        """ETL 运行统计表 — 数据质量与管道监控"""
+        sql = """
+        CREATE TABLE IF NOT EXISTS etl_stats (
+            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+            run_id VARCHAR(64) NOT NULL COMMENT '运行批次 ID',
+            stage VARCHAR(50) NOT NULL COMMENT 'ETL 阶段 (extract/transform/load)',
+            table_name VARCHAR(100) DEFAULT NULL COMMENT '操作表名',
+            records_in INT DEFAULT 0 COMMENT '输入记录数',
+            records_out INT DEFAULT 0 COMMENT '输出记录数',
+            records_duplicates INT DEFAULT 0 COMMENT '去重数',
+            records_errors INT DEFAULT 0 COMMENT '错误数',
+            success_rate DECIMAL(5,2) DEFAULT NULL COMMENT '成功率 (%)',
+            duration_ms INT DEFAULT 0 COMMENT '耗时 (ms)',
+            status VARCHAR(20) DEFAULT 'success' COMMENT '状态 (success/failed)',
+            error_message TEXT DEFAULT NULL COMMENT '错误信息',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_run_id (run_id),
+            INDEX idx_stage (stage),
+            INDEX idx_created_at (created_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        """
+        self.execute_query(sql)
 
     def _create_reviews_table(self):
         sql = """
@@ -383,6 +468,122 @@ class Database:
             "SELECT analysis_type, COUNT(*), SUM(tokens_used) FROM analysis_cache GROUP BY analysis_type"
         )
         return {r[0]: {"count": r[1], "tokens": r[2] or 0} for r in rows}
+
+    # ════════════════════════════════════════════════════════════
+    # ETL 运行统计
+    # ════════════════════════════════════════════════════════════
+
+    def log_etl_run(
+        self, run_id: str, stage: str, table_name: str = None,
+        records_in: int = 0, records_out: int = 0,
+        records_duplicates: int = 0, records_errors: int = 0,
+        duration_ms: int = 0, status: str = "success", error_message: str = None,
+    ):
+        """记录 ETL 运行日志到 etl_stats 表"""
+        success_rate = round((records_out / max(records_in, 1)) * 100, 2)
+        sql = """
+        INSERT INTO etl_stats
+            (run_id, stage, table_name, records_in, records_out,
+             records_duplicates, records_errors, success_rate,
+             duration_ms, status, error_message)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """
+        self.execute_query(sql, (
+            run_id, stage, table_name, records_in, records_out,
+            records_duplicates, records_errors, success_rate,
+            duration_ms, status, error_message,
+        ))
+
+    def get_etl_summary(self, limit: int = 20) -> list[dict]:
+        """获取最近 ETL 运行摘要"""
+        rows = self.fetch_query(
+            "SELECT run_id, stage, table_name, records_in, records_out, "
+            "success_rate, duration_ms, status, created_at "
+            "FROM etl_stats ORDER BY id DESC LIMIT %s", (limit,)
+        )
+        return [
+            {
+                "run_id": r[0], "stage": r[1], "table_name": r[2],
+                "records_in": r[3], "records_out": r[4],
+                "success_rate": float(r[5]) if r[5] else 0,
+                "duration_ms": r[6], "status": r[7], "created_at": str(r[8]),
+            }
+            for r in rows
+        ]
+
+    def get_data_quality_report(self) -> dict:
+        """数据质量报告 — 完整性、一致性、准确性指标"""
+        total = self.get_table_count("translated_records")
+        # 字段完整性
+        null_author = self.fetch_one(
+            "SELECT COUNT(*) FROM translated_records WHERE author IS NULL OR author = ''"
+        )[0]
+        null_rate = self.fetch_one(
+            "SELECT COUNT(*) FROM translated_records WHERE data_type='review' AND rate IS NULL"
+        )[0]
+        null_date = self.fetch_one(
+            "SELECT COUNT(*) FROM translated_records WHERE publish_date IS NULL"
+        )[0]
+        # 唯一性
+        unique_authors = self.fetch_one(
+            "SELECT COUNT(DISTINCT author) FROM translated_records WHERE author IS NOT NULL AND author != ''"
+        )[0]
+        unique_products = self.fetch_one(
+            "SELECT COUNT(DISTINCT name) FROM translated_records"
+        )[0]
+        # 评分分布
+        invalid_rate = self.fetch_one(
+            "SELECT COUNT(*) FROM translated_records WHERE data_type='review' AND (rate < 1 OR rate > 5)"
+        )[0]
+        return {
+            "total_records": total,
+            "completeness": {
+                "missing_author_rate": round(null_author / max(total, 1) * 100, 2),
+                "missing_rate_field": round(null_rate / max(total, 1) * 100, 2),
+                "missing_date": round(null_date / max(total, 1) * 100, 2),
+            },
+            "uniqueness": {
+                "distinct_authors": unique_authors,
+                "distinct_products": unique_products,
+            },
+            "validity": {
+                "invalid_rate_count": invalid_rate,
+                "valid_rate_pct": round(
+                    (total - invalid_rate) / max(total, 1) * 100, 2
+                ),
+            },
+        }
+
+    # ── 维度表操作方法 ──────────────────────────────────────
+
+    def ensure_dim_product(self, name: str, sku: str = None) -> int:
+        """确保产品维度记录存在，返回 product_id"""
+        existing = self.fetch_one(
+            "SELECT product_id FROM dim_product WHERE product_name=%s AND (sku=%s OR (sku IS NULL AND %s IS NULL))",
+            (name, sku, sku),
+        )
+        if existing:
+            return existing[0]
+        self.execute_query(
+            "INSERT INTO dim_product (product_name, sku) VALUES (%s, %s) "
+            "ON DUPLICATE KEY UPDATE product_name=VALUES(product_name)",
+            (name, sku),
+        )
+        return self.cursor.lastrowid
+
+    def ensure_dim_platform(self, platform_name: str) -> int:
+        """确保平台维度记录存在，返回 platform_id"""
+        existing = self.fetch_one(
+            "SELECT platform_id FROM dim_platform WHERE platform_name=%s", (platform_name,)
+        )
+        if existing:
+            return existing[0]
+        self.execute_query(
+            "INSERT INTO dim_platform (platform_name) VALUES (%s) "
+            "ON DUPLICATE KEY UPDATE platform_name=VALUES(platform_name)",
+            (platform_name,),
+        )
+        return self.cursor.lastrowid
 
     # ════════════════════════════════════════════════════════════
     # 统计查询（供 generate_stats.py 使用）

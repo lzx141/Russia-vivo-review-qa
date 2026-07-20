@@ -88,3 +88,18 @@ DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 OUTPUT_DIR = os.getenv("OUTPUT_DIR", os.path.join(PROJECT_ROOT, "output"))
 DASHBOARD_DIR = os.path.join(PROJECT_ROOT, "src", "dashboard")
 DASHBOARD_DATA_JS = os.path.join(DASHBOARD_DIR, "dashboard_data.js")
+
+# ============================================================
+# 数据管道配置
+# ============================================================
+PIPELINE_CONFIG = {
+    "run_id_prefix": "etl",
+    "batch_size": int(os.getenv("ETL_BATCH_SIZE", "1000")),
+    "enable_quality_check": os.getenv("ENABLE_QUALITY_CHECK", "true").lower() == "true",
+    "alert_on_failure": os.getenv("ALERT_ON_FAILURE", "false").lower() == "true",
+}
+
+# ============================================================
+# 环境标识
+# ============================================================
+ENV = os.getenv("APP_ENV", "development")  # development / staging / production

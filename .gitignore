@@ -35,3 +35,12 @@ output/
 # 操作系统文件
 .DS_Store
 Thumbs.db
+
+# 简历文件
+*简历*.pdf
+*简历*.docx
+
+# Node.js 临时文件
+node_modules/
+package.json
+package-lock.json
