@@ -100,8 +100,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
         # 安全比较（防时序攻击）
         if not hmac.compare_digest(received_sig, expected_sig):
-            logger.error("签名验证失败: received=%s, expected=%s",
-                         received_sig[:20] + "...", expected_sig[:20] + "...")
+            logger.error("签名验证失败 — HMAC 不匹配，请检查 GITHUB_WEBHOOK_SECRET 是否一致")
             return False
 
         return True
