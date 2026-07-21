@@ -3,6 +3,7 @@
 config.py.bak
 *.ini
 *.conf
+!deploy/nginx_webhook.conf
 
 # Python 生成的文件
 __pycache__/

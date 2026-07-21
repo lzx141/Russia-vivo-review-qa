@@ -1,0 +1,28 @@
+[Unit]
+Description=GitHub Webhook Server for Russia-vivo-review-qa
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/path/to/Russia-vivo-review-qa
+ExecStart=/usr/bin/python3 /path/to/Russia-vivo-review-qa/deploy/webhook_server.py --port 9000
+Restart=always
+RestartSec=5
+StartLimitInterval=300
+StartLimitBurst=5
+
+# 环境变量（从 .env 读取或直接设置）
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=/path/to/Russia-vivo-review-qa/.env
+
+# 安全配置
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

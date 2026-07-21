@@ -9,6 +9,10 @@
 
 **项目地址**：[http://116.62.152.97/](http://116.62.152.97/)
 
+> 部署在阿里云 ECS（2核2GiB，华东1），使用 Nginx + MySQL 提供访问
+>
+> **自动部署**：已配置 GitHub Webhook，`git push` 后自动拉取代码并刷新数据
+> 详细配置见 [deploy/README-WEBHOOK.md](deploy/README-WEBHOOK.md)
 
 ---
 
