@@ -204,14 +204,15 @@ def crawl_ozon_reviews_by_url(product_url: str, model_name: str = "Unknown Model
                 except Exception:
                     review_datetime = None
             
-            # 只处理2026年4月的评论的评论
+            # 按传入的日期范围过滤（不再硬编码月份）
             if review_datetime:
-                if review_datetime.year == 2026 and review_datetime.month == 4:
-                    # 将日期转换为标准格式
-                    publish_date_standard = review_datetime.strftime('%Y-%m-%d %H:%M')
-                else:
+                if start_datetime and review_datetime < start_datetime:
                     skipped_count += 1
                     continue
+                if end_datetime and review_datetime > end_datetime:
+                    skipped_count += 1
+                    continue
+                publish_date_standard = review_datetime.strftime('%Y-%m-%d %H:%M')
             else:
                 skipped_count += 1
                 continue
@@ -474,7 +475,14 @@ def crawl_ozon_qa_by_url(product_url: str, model_name: str = "Unknown Model",
             except Exception:
                 q_datetime = None
 
-        if not q_datetime or not (q_datetime.year == 2026 and q_datetime.month == 4):
+        if not q_datetime:
+            skipped_count += 1
+            continue
+
+        if start_datetime and q_datetime < start_datetime:
+            skipped_count += 1
+            continue
+        if end_datetime and q_datetime > end_datetime:
             skipped_count += 1
             continue
 
@@ -521,11 +529,14 @@ def save_data_to_file(data, file_path, data_type):
 
     if 'publishDate' in new_df.columns and data_type == 'reviews':
         new_df['publishDate'] = pd.to_datetime(new_df['publishDate'], errors='coerce')
-        new_df = new_df[new_df['publishDate'].dt.year == 2026]
-        new_df = new_df[new_df['publishDate'].dt.month == 4]
+        # 按当前目标月份（上月）过滤，与 crawl_from_excel 的日期范围保持一致
+        target_start, target_end = _default_last_month()
+        target_start_dt = pd.to_datetime(target_start)
+        target_end_dt = pd.to_datetime(target_end)
+        new_df = new_df[new_df['publishDate'].between(target_start_dt, target_end_dt)]
 
         if new_df.empty:
-            print(f"⚠️ 没有2026年2月和3月的{data_type}数据，无法创建或更新文件。")
+            print(f"⚠️ 没有{target_start} ~ {target_end}的{data_type}数据，无法创建或更新文件。")
             return
 
         new_df['publishDate'] = new_df['publishDate'].dt.strftime('%Y-%m-%d %H:%M')
@@ -563,20 +574,39 @@ def save_data_to_file(data, file_path, data_type):
             print(f" 日期: {row['publishDate']}")
         print("-" * 20)
 
-def crawl_from_excel(excel_path: str, start_date: str = "2026-02-01", end_date: str = "2026-03-31"):
+def _default_last_month() -> tuple[str, str]:
+    """
+    动态计算上个月的起止日期（每月3号跑定时任务时，爬取完整的上月数据）
+    Returns:
+        (start_date, end_date) 格式 'YYYY-MM-DD'
+    """
+    today = pd.Timestamp.today()
+    first_of_month = today.replace(day=1)
+    last_month_end = first_of_month - pd.Timedelta(days=1)
+    last_month_start = last_month_end.replace(day=1)
+    return last_month_start.strftime('%Y-%m-%d'), last_month_end.strftime('%Y-%m-%d')
+
+
+def crawl_from_excel(excel_path: str, start_date: str = None, end_date: str = None):
     """
     从Excel文件读取链接并爬取Ozon评论
     Args:
         excel_path: Excel文件路径
-        start_date: 开始日期 (格式: 'YYYY-MM-DD')
-        end_date: 结束日期 (格式: 'YYYY-MM-DD')
+        start_date: 开始日期 (格式: 'YYYY-MM-DD')，默认自动取上月
+        end_date: 结束日期 (格式: 'YYYY-MM-DD')，默认自动取上月
     """
+    if start_date is None or end_date is None:
+        auto_start, auto_end = _default_last_month()
+        start_date = start_date or auto_start
+        end_date = end_date or auto_end
+        print(f"📅 动态日期范围: {start_date} ~ {end_date}")
+
     if not os.path.exists(excel_path):
         print(f"❌ Excel文件不存在: {excel_path}")
         return
-    
+
     df = pd.read_excel(excel_path, engine='openpyxl')
-    
+
     if '网址' not in df.columns or '名称' not in df.columns:
         print("❌ Excel文件中未找到'网址'或'名称'列")
         return
@@ -590,10 +620,16 @@ def crawl_from_excel(excel_path: str, start_date: str = "2026-02-01", end_date: 
     for idx, row in ozon_df.iterrows():
         url = row.get('网址', '')
         model_name = row.get('机型', 'Unknown Model')
-        
+
         if not url:
             continue
-        
+
+        # OZON 评论区排序：追加 sort=published_at_desc，按发布时间倒序展示
+        # 这样无需手动点击"Сортировать"下拉框，即可让评论按时间顺序加载
+        sep = '&' if '?' in url else '?'
+        url = url.split('#')[0] + sep + 'sort=published_at_desc'
+        print(f"🔀 已启用按时间排序: {url}")
+
         print(f"\n{'='*60}")
         print(f"处理第 {idx + 1}/{len(ozon_df)} 个链接")
         print(f"商品名称: {model_name}")

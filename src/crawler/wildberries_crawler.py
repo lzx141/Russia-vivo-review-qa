@@ -209,16 +209,15 @@ def crawl_wildberries_reviews_manual(imt_id: str, original_url: str = "https://w
                                     review_datetime = None
                             
                             if review_datetime:
-                                if review_datetime.year == 2026 and review_datetime.month == 4:
-                                    if start_datetime and review_datetime <= start_datetime:
-                                        skipped_count += 1
-                                        early_stop = True
-                                
-                                        continue
-                                    
-                                    if end_datetime and review_datetime >= end_datetime:
-                                        skipped_count += 1
-                                        continue
+                                if start_datetime and review_datetime <= start_datetime:
+                                    skipped_count += 1
+                                    early_stop = True
+
+                                    continue
+
+                                if end_datetime and review_datetime >= end_datetime:
+                                    skipped_count += 1
+                                    continue
                             
                             review_text = format_review(fb)
                             author = "Аноним"
@@ -540,7 +539,26 @@ def save_data_to_file(data, file_path, data_type):
         print("-" * 20)
 
 
-def crawl_from_excel(excel_path: str, start_date: str = "2026-04-01", end_date: str = "2026-04-30"):
+def _default_last_month() -> tuple[str, str]:
+    """
+    动态计算上个月的起止日期（每月3号跑定时任务时，爬取完整的上月数据）
+    Returns:
+        (start_date, end_date) 格式 'YYYY-MM-DD'
+    """
+    today = pd.Timestamp.today()
+    first_of_month = today.replace(day=1)
+    last_month_end = first_of_month - pd.Timedelta(days=1)
+    last_month_start = last_month_end.replace(day=1)
+    return last_month_start.strftime('%Y-%m-%d'), last_month_end.strftime('%Y-%m-%d')
+
+
+def crawl_from_excel(excel_path: str, start_date: str = None, end_date: str = None):
+    if start_date is None or end_date is None:
+        auto_start, auto_end = _default_last_month()
+        start_date = start_date or auto_start
+        end_date = end_date or auto_end
+        print(f"📅 动态日期范围: {start_date} ~ {end_date}")
+
     if not os.path.exists(excel_path):
         print(f"Excel文件不存在: {excel_path}")
         return
