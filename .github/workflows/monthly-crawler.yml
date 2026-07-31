@@ -21,6 +21,8 @@ jobs:
     name: Crawl & Process Data
     runs-on: ubuntu-latest
     timeout-minutes: 300
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout code
@@ -41,9 +43,14 @@ jobs:
       - name: Install Chromium (for OZON Selenium crawler)
         run: |
           sudo apt-get update
-          sudo apt-get install -y chromium-browser chromium-chromedriver 2>/dev/null || \
+          # 尝试多种安装方式，确保 chromium 可用
+          sudo apt-get install -y chromium-browser chromium-driver 2>/dev/null || \
+          sudo apt-get install -y chromium chromium-driver 2>/dev/null || \
           sudo apt-get install -y chromium-browser 2>/dev/null || true
-          which chromium chromium-browser chromedriver || true
+          # 安装 selenium 所需 driver 管理
+          pip install selenium
+          echo "--- check ---"
+          which chromium chromium-browser chromedriver 2>/dev/null || echo "chromium check done"
 
       - name: Determine date range
         id: dates
