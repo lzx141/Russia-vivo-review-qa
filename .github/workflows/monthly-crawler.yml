@@ -116,8 +116,16 @@ jobs:
           # 仅提交有变化的文件（原始数据/、翻译CSV）
           if ! git diff --cached --quiet; then
             git commit -m "data: 月度数据自动更新 $(date +%Y%m%d)"
-            git push origin main
-            echo "✅ 数据已推送，触发服务器 webhook 自动部署"
+            # 先拉取远程最新代码（rebase），避免非快进更新冲突
+            for i in 1 2 3; do
+              git pull --rebase origin main 2>&1 || true
+              if git push origin main 2>&1; then
+                echo "✅ 数据已推送，触发服务器 webhook 自动部署"
+                break
+              fi
+              echo "⚠️ push 失败，第 ${i} 次重试..."
+              sleep 5
+            done
           else
             echo "ℹ️ 没有数据变化，跳过提交"
           fi
