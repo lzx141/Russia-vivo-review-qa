@@ -16,6 +16,8 @@ __pycache__/
 *.xlsx
 *.csv
 *.xls
+# 商品链接 Excel（爬虫/CI 必需，强制跟踪）
+!Rusisa_new_20260130_all.xlsx
 
 # IDE 配置
 .vscode/
