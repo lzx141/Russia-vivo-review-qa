@@ -11,6 +11,97 @@ from selenium.common.exceptions import NoSuchElementException, TimeoutException
 import os
 import dateparser
 
+
+def _is_search_redirect_page(driver) -> bool:
+    """判断当前页面是否是被重定向的 OZON 搜索/推荐页（原商品已售罄）"""
+    try:
+        current_url = driver.current_url or ""
+        if "/search/" in current_url or "product_id=" in current_url:
+            return True
+        # 检查售罄提示
+        body_text = driver.find_element(By.TAG_NAME, "body").text
+        if "Этот товар закончился" in body_text or "этот товар закончился" in body_text.lower():
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _click_product_card_to_detail(driver, model_name: str, wait: WebDriverWait) -> bool:
+    """
+    在 OZON 搜索/推荐页中，自动点击匹配的商品卡片进入详情页。
+
+    策略：
+      1. 优先按 URL slug / 标题文本匹配机型名称
+      2. 若找不到精确匹配，点击第一个商品卡片
+
+    Returns:
+        True 表示成功进入商品详情页
+    """
+    try:
+        # 等待商品卡片链接加载
+        time.sleep(random.uniform(3, 5))
+        links = driver.find_elements(By.XPATH, '//a[contains(@href, "/product/")]')
+        if not links:
+            print("⚠️ 搜索页未找到商品卡片链接")
+            return False
+
+        # 规范化机型名用于匹配
+        model_key = model_name.lower().replace(" ", "-").replace("(", "").replace(")", "")
+        matched = None
+
+        # 策略1: 匹配 href 中包含机型 slug 的链接
+        for link in links:
+            href = (link.get_attribute("href") or "").lower()
+            if model_key and model_key in href:
+                matched = link
+                break
+
+        # 策略2: 匹配链接文本中包含机型名
+        if not matched:
+            for link in links:
+                text = (link.text or "").lower()
+                if model_name.lower() in text:
+                    matched = link
+                    break
+
+        # 策略3: 回退到第一个链接
+        if not matched:
+            matched = links[0]
+            print(f"⚠️ 未找到匹配「{model_name}」的商品，回退点击第一个卡片")
+
+        # 点击进入详情页
+        driver.execute_script("arguments[0].click();", matched)
+        time.sleep(random.uniform(6, 9))
+
+        # 验证是否进入详情页
+        if not _is_search_redirect_page(driver):
+            # 重新加载并追加 sort=published_at_desc，确保评论按时间倒序
+            current = driver.current_url
+            if "sort=" not in current:
+                sep = "&" if "?" in current else "?"
+                detail_url = current.split("#")[0] + sep + "sort=published_at_desc"
+                driver.get(detail_url)
+                time.sleep(random.uniform(6, 9))
+            print(f"✅ 已进入商品详情页: {driver.current_url[:80]}")
+            return True
+        else:
+            print("⚠️ 点击后仍在搜索页，可能该商品确实无货")
+            return False
+
+    except Exception as e:
+        print(f"⚠️ 自动进入详情页失败: {e}")
+        return False
+
+
+def _ensure_detail_page(driver, model_name: str, wait: WebDriverWait) -> None:
+    """确保停留在商品详情页（若被重定向到搜索页则自动进入）"""
+    if _is_search_redirect_page(driver):
+        print("🔍 检测到 OZON 搜索/推荐页（原商品售罄），正在自动进入商品详情页...")
+        _click_product_card_to_detail(driver, model_name, wait)
+    else:
+        print("✅ 已打开商品详情页")
+
 def crawl_ozon_reviews_by_url(product_url: str, model_name: str = "Unknown Model",
                                start_date: str = None, end_date: str = None):
     """
@@ -53,7 +144,10 @@ def crawl_ozon_reviews_by_url(product_url: str, model_name: str = "Unknown Model
     print(f"正在打开商品页面: {product_url}")
     driver.get(product_url)
     time.sleep(random.uniform(10, 15))
-    
+
+    # 若被重定向到搜索页（商品售罄），自动点击进入商品详情页
+    _ensure_detail_page(driver, model_name, wait)
+
     print("正在滚动到评论区域...")
     try:
         reviews_section = wait.until(
@@ -283,6 +377,9 @@ def crawl_ozon_qa_by_url(product_url: str, model_name: str = "Unknown Model",
     print(f"正在打开商品页面: {product_url}")
     driver.get(product_url)
     time.sleep(random.uniform(10, 15))
+
+    # 若被重定向到搜索页（商品售罄），自动点击进入商品详情页
+    _ensure_detail_page(driver, model_name, wait)
 
     print("正在滚动到评论区域...")
     try:
