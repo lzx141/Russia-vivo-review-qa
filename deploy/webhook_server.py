@@ -77,6 +77,15 @@ class WebhookHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(json.dumps(body, ensure_ascii=False).encode("utf-8"))
 
+    def _read_body(self) -> bytes:
+        """读取请求体并缓存（供签名验证和 payload 解析复用）"""
+        if hasattr(self, "_request_body"):
+            return self._request_body
+        content_length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(content_length)
+        self._request_body = body
+        return body
+
     def _verify_signature(self) -> bool:
         """验证 GitHub HMAC-SHA256 签名"""
         secret = self.webhook_secret
@@ -89,9 +98,8 @@ class WebhookHandler(BaseHTTPRequestHandler):
             logger.error("缺少 X-Hub-Signature-256 头")
             return False
 
-        # 读取请求体
-        content_length = int(self.headers.get("Content-Length", 0))
-        body = self.rfile.read(content_length)
+        # 读取请求体（缓存复用）
+        body = self._read_body()
 
         # 计算期望签名
         expected_sig = "sha256=" + hmac.new(
@@ -106,9 +114,8 @@ class WebhookHandler(BaseHTTPRequestHandler):
         return True
 
     def _parse_payload(self) -> dict:
-        """解析请求体 JSON 为 dict"""
-        content_length = int(self.headers.get("Content-Length", 0))
-        body = self.rfile.read(content_length)
+        """解析请求体 JSON 为 dict（复用签名验证时读取的 body）"""
+        body = self._read_body()
         try:
             return json.loads(body.decode("utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError) as e:
