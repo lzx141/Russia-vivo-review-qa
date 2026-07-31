@@ -76,6 +76,7 @@ Russia-vivo-review-qa/
 │   ├── translation/           # 翻译管道
 │   │   ├── __init__.py
 │   │   └── translate.py       # 火山引擎翻译（断点续传）
+│   │   └── translate_deepseek.py  # ★ 新增：DeepSeek 批量翻译（增量合并 + 断点续传）
 │   └── dashboard/             # 可视化大屏
 │       ├── __init__.py
 │       ├── index.html         # 主页面（7 页面交互式大屏）
@@ -115,7 +116,7 @@ Russia-vivo-review-qa/
 │   analysis_cache 表缓存结果，避免重复调用（缓存命中率 60%+）    │
 ├─────────────────────────────────────────────────────────────────┤
 │                         翻译层 ★                                │
-│   火山引擎翻译 API → 俄语 → 中文 / 英文（断点续传）             │
+│   DeepSeek 大模型批量翻译 → 俄语 → 中文（断点续传 + 增量）       │
 ├─────────────────────────────────────────────────────────────────┤
 │                         数据层（星型模型）★                       │
 │   dim_product（产品） · dim_platform（平台） · dim_date（时间）  │
@@ -123,7 +124,7 @@ Russia-vivo-review-qa/
 │   etl_stats（管道监控）· 数据质量报告自动生成                    │
 ├─────────────────────────────────────────────────────────────────┤
 │                         采集层                                    │
-│   Wildberries + OZON 用户评论/问答爬虫 → MySQL (82,196 条)     │
+│   Wildberries + OZON + Yandex Market 用户评论/问答爬虫 → MySQL   │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -186,17 +187,17 @@ export DEEPSEEK_API_KEY=sk-your-deepseek-api-key
 ## 数据流
 
 ```
-Wildberries / OZON 原始俄语数据 (Excel)
+Wildberries / OZON / Yandex Market 原始俄语数据 (Excel)
        ↓
 [采集层] src/crawler/ → Selenium 浏览器自动化 → 多平台数据采集
        ↓
 [ETL] src/etl/etl.py → 数据清洗、去重、字段映射 → MySQL (reviews / questions)
        ↓
-[翻译] src/translation/translate.py → 火山引擎 API → MySQL (translated_records)
+[翻译] src/translation/translate_deepseek.py → DeepSeek 批量翻译 → merged_data_translated.csv
        ↓
-[AI 分析] src/analysis/analyzer.py → DeepSeek V4 Flash API → MySQL (analysis_cache)
+[入库] src/etl/init_database.py → 翻译数据加载 → MySQL (translated_records)
        ↓
-[统计] src/dashboard/generate_stats.py → SQL 聚合（窗口函数 + CASE 表达式）→ dashboard_data.js
+[统计] src/dashboard/generate_stats.py → SQL 聚合 + 规则分析 → dashboard_data.js
        ↓
 [展示] index.html + app.js + charts.js → ECharts 5.5 可视化
 ```
@@ -324,14 +325,11 @@ python src/analysis/analyzer.py --mode intent --db
 ### 翻译
 
 ```bash
-# 完整翻译管道（原始 Excel → 翻译 → CSV）
-python src/translation/translate.py
+# 增量翻译（DeepSeek 批量翻译新增俄语数据 → 中文，自动合并到 CSV）
+python src/translation/translate_deepseek.py
 
-# 增量翻译已存在的 CSV
-python src/translation/translate.py --from-csv
-
-# 断点续传
-python src/translation/translate.py --resume
+# 仅统计待翻译数量，不调用 API
+python src/translation/translate_deepseek.py --dry-run
 ```
 
 ### 数据质量
@@ -369,11 +367,11 @@ python -m unittest discover tests -v
 
 ## 数据概况
 
-- **数据总量**：82,196 条（评论 52,462 + 问答 29,734）
-- **产品数**：25 款 vivo/iQOO 手机
+- **数据总量**：84,549 条（评论 54,049 + 问答 30,500）
+- **产品数**：26 款 vivo/iQOO 手机
 - **平均评分**：4.85 / 5.0
-- **数据时间**：2025.03 - 2026.04
-- **数据来源**：Wildberries、OZON（俄罗斯电商平台）
+- **数据时间**：2025.03 - 2026.05（含最新月度数据）
+- **数据来源**：Wildberries、OZON、Yandex Market（俄罗斯电商平台）
 
 ---
 
@@ -382,8 +380,8 @@ python -m unittest discover tests -v
 | 层级 | 技术 |
 |------|------|
 | 前端可视化 | ECharts 5.5.0、ECharts WordCloud、ECharts GeoMap |
-| AI 模型 | DeepSeek V4 Flash（情感/意图/NER/根因/摘要） |
-| 翻译引擎 | 火山引擎翻译 API（俄→中/英，断点续传） |
+| AI 模型 | DeepSeek V4 Flash（情感/意图/NER/根因/摘要，可切换为规则分析） |
+| 翻译引擎 | DeepSeek 大模型批量翻译（俄→中，断点续传 + 增量合并） |
 | 数据处理 | Pandas、NumPy、jieba 分词、scikit-learn TF-IDF |
 | 数据仓库 | 星型模型（产品/平台/时间维度表 + 事实表） |
 | 数据库 | MySQL（含 analysis_cache 缓存表 + etl_stats 监控表） |

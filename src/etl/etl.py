@@ -112,7 +112,7 @@ class ETLProcessor:
                     item.get("publishDate", item.get("PublishDate", ""))
                 ),
                 "rate": item.get("rate", item.get("Rate", item.get("rating", ""))),
-                "content": item.get("content", item.get("Content", "")),
+                "content": item.get("content", item.get("Content", item.get("review_text", ""))),
                 "name": item.get("name", item.get("Name", "")),
                 "SKU": item.get("SKU", item.get("sku", "")),
                 "URL": item.get("URL", item.get("url", "")),
@@ -224,7 +224,7 @@ class ETLProcessor:
             logger.info("\n[1/3] 处理评论数据...")
             all_reviews = []
             t0 = time.time()
-            for group in ["ozon_reviews", "wildberries_reviews"]:
+            for group in ["ozon_reviews", "wildberries_reviews", "yandex_reviews"]:
                 all_reviews.extend(self.extract_excel_data(DATA_PATHS[group]))
             transformed = self.transform_reviews(all_reviews)
             self.load_data(transformed, [])

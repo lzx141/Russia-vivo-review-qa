@@ -589,6 +589,25 @@ class Database:
     # 统计查询（供 generate_stats.py 使用）
     # ════════════════════════════════════════════════════════════
 
+    def get_month_series(self) -> list[str]:
+        """从数据中推导连续月份序列（如 2025-03 ~ 2026-05）"""
+        row = self.fetch_one(
+            "SELECT MIN(publish_date), MAX(publish_date) "
+            "FROM translated_records WHERE publish_date IS NOT NULL"
+        )
+        if not row or not row[0] or not row[1]:
+            return ["2025-03"]
+        import datetime
+
+        start = row[0] if isinstance(row[0], datetime.datetime) else datetime.datetime.strptime(str(row[0])[:10], "%Y-%m-%d")
+        end = row[1] if isinstance(row[1], datetime.datetime) else datetime.datetime.strptime(str(row[1])[:10], "%Y-%m-%d")
+        months = []
+        cur = start.replace(day=1)
+        while cur <= end:
+            months.append(cur.strftime("%Y-%m"))
+            cur = cur.replace(year=cur.year + (cur.month == 12), month=(cur.month % 12) + 1)
+        return months
+
     def get_kpi_stats(self) -> dict:
         """获取 KPI 概览数据"""
         total = self.fetch_one("SELECT COUNT(*) FROM translated_records")[0]
@@ -626,6 +645,7 @@ class Database:
             "SELECT COUNT(DISTINCT site_name) FROM translated_records"
         )[0]
 
+        months = self.get_month_series()
         return {
             "total_records": total,
             "total_reviews": reviews,
@@ -637,8 +657,8 @@ class Database:
             "positive_rate": positive_rate,
             "five_star_rate": five_star_rate,
             "platforms": platforms,
-            "date_range_start": "2025-03",
-            "date_range_end": "2026-04",
+            "date_range_start": months[0] if months else "2025-03",
+            "date_range_end": months[-1] if months else "2026-04",
         }
 
     def get_rating_dist(self) -> dict:
@@ -653,13 +673,8 @@ class Database:
         return {"labels": labels, "values": values}
 
     def get_monthly_trend(self) -> dict:
-        """月度趋势"""
-        months = [
-            "2025-03", "2025-04", "2025-05", "2025-06",
-            "2025-07", "2025-08", "2025-09", "2025-10",
-            "2025-11", "2025-12", "2026-01", "2026-02",
-            "2026-03", "2026-04",
-        ]
+        """月度趋势（月份列表动态生成，自动包含最新数据月份）"""
+        months = self.get_month_series()
         result = {"months": months, "total": [], "reviews": [], "qa": [], "avg_rating": []}
         for m in months:
             prefix = f"{m}%"
@@ -709,32 +724,38 @@ class Database:
         ]
 
     def get_platform_comparison(self) -> dict:
-        """平台对比"""
+        """平台对比（OZON / Wildberries / Yandex Market）"""
         platforms = {}
+        order = ["OZON", "Wildberries", "Yandex Market"]
         for row in self.fetch_query(
             "SELECT site_name, COUNT(*), "
             "COUNT(CASE WHEN data_type='review' THEN 1 END), "
             "AVG(CASE WHEN data_type='review' AND rate IS NOT NULL THEN rate END) "
             "FROM translated_records GROUP BY site_name"
         ):
-            name = row[0]
-            if "OZON" in name.upper() and "OZON" not in [p.upper() for p in platforms]:
-                key = "OZON"
-            elif "WILDBERRIES" in name.upper() and "WILDBERRIES" not in [p.upper() for p in platforms]:
-                key = "Wildberries"
-            else:
+            name = row[0] or ""
+            up = name.upper()
+            key = None
+            for candidate in order:
+                if candidate.upper() in up:
+                    key = candidate
+                    break
+            if not key:
                 continue
             if key not in platforms:
-                platforms[key] = {"total": 0, "reviews": 0, "qa": 0, "avg_rating": 0.0}
+                platforms[key] = {"total": 0, "reviews": 0, "qa": 0, "avg_sum": 0.0}
             platforms[key]["total"] += row[1]
             platforms[key]["reviews"] += row[2]
             platforms[key]["qa"] += row[1] - row[2]
-            platforms[key]["avg_rating"] = row[3] if row[3] else 0
-        if "OZON" in platforms:
-            platforms["OZON"]["avg_rating"] = round(float(platforms["OZON"]["avg_rating"]), 2)
-        if "Wildberries" in platforms:
-            platforms["Wildberries"]["avg_rating"] = round(float(platforms["Wildberries"]["avg_rating"]), 2)
-        return platforms
+            if row[3]:
+                platforms[key]["avg_sum"] += float(row[3]) * row[2]
+        result = {}
+        for key, p in platforms.items():
+            avg = round(p["avg_sum"] / max(p["reviews"], 1), 2) if p["reviews"] else 0.0
+            result[key] = {
+                "total": p["total"], "reviews": p["reviews"], "qa": p["qa"], "avg_rating": avg,
+            }
+        return result
 
     def get_review_length_dist(self) -> dict:
         """评论长度分布"""
@@ -782,13 +803,8 @@ class Database:
         return [[int(r[0]), r[1]] for r in rows]
 
     def get_product_monthly(self) -> dict:
-        """各产品月度数据"""
-        months = [
-            "2025-03", "2025-04", "2025-05", "2025-06",
-            "2025-07", "2025-08", "2025-09", "2025-10",
-            "2025-11", "2025-12", "2026-01", "2026-02",
-            "2026-03", "2026-04",
-        ]
+        """各产品月度数据（月份列表动态生成）"""
+        months = self.get_month_series()
         top_names = [
             r[0]
             for r in self.fetch_query(

@@ -26,6 +26,7 @@ __pycache__/
 
 # 翻译进度文件
 .translate_progress.json
+.translate_deepseek_progress.json
 
 # 输出目录
 output/
@@ -45,3 +46,9 @@ Thumbs.db
 node_modules/
 package.json
 package-lock.json
+
+# 本地临时文件
+.playwright-mcp/
+*.bak
+.translate_deepseek.log
+.translate_deepseek2.log

@@ -7,6 +7,26 @@ const baseOpt = () => ({backgroundColor:'transparent',textStyle:{color:'rgba(210
 const D = (typeof DASHBOARD_DATA !== 'undefined') ? DASHBOARD_DATA : null;
 if(!D){document.querySelector('.page-container').innerHTML='<h2 style="text-align:center;margin-top:40vh;color:var(--accent)">请先运行 python generate_stats.py</h2>'}
 
+/* ═══════ HIDE LOADING + FOOTER INFO ═══════ */
+window.addEventListener('load',()=>{
+  const lo=document.getElementById('loadingOverlay');
+  if(lo){lo.classList.add('hidden');setTimeout(()=>lo.remove(),600)}
+  if(D){
+    const kpi=D.kpi||{};
+    if(kpi.date_range_start&&kpi.date_range_end){
+      const dr=document.getElementById('dateRange');
+      if(dr)dr.textContent=`${kpi.date_range_start} ~ ${kpi.date_range_end}`;
+    }
+    const meta=D.meta||{};
+    if(meta.generated_at){
+      const ut=document.getElementById('updateTime');
+      if(ut)ut.textContent=meta.generated_at;
+    }
+  }
+});
+/* 兜底：若资源在 load 前已就绪，立即隐藏 */
+setTimeout(()=>{const lo=document.getElementById('loadingOverlay');if(lo){lo.classList.add('hidden');setTimeout(()=>lo.remove(),600)}},3000);
+
 const chartInstances = {};
 
 /* ═══════ PARTICLE BACKGROUND ═══════ */

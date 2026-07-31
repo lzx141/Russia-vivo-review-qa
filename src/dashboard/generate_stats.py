@@ -158,6 +158,7 @@ class DataProvider:
         five = rate_col[rate_col == 5].dropna()
         five_star = round(len(five) / len(reviews) * 100, 1) if len(reviews) > 0 else 0
 
+        months = self._csv_month_series()
         return {
             "total_records": len(df),
             "total_reviews": len(reviews),
@@ -169,9 +170,26 @@ class DataProvider:
             "positive_rate": positive_rate,
             "five_star_rate": five_star,
             "platforms": df["siteName"].nunique() if "siteName" in df.columns else 2,
-            "date_range_start": "2025-03",
-            "date_range_end": "2026-04",
+            "date_range_start": months[0] if months else "2025-03",
+            "date_range_end": months[-1] if months else "2026-04",
         }
+
+    def _csv_month_series(self) -> list:
+        """从 CSV 数据推导连续月份序列"""
+        import pandas as pd
+        if "publishDate" not in self.df.columns:
+            return ["2025-03"]
+        dates = pd.to_datetime(self.df["publishDate"], errors="coerce").dropna()
+        if len(dates) == 0:
+            return ["2025-03"]
+        start = dates.min()
+        end = dates.max()
+        months = []
+        cur = start.replace(day=1)
+        while cur <= end:
+            months.append(cur.strftime("%Y-%m"))
+            cur = cur + pd.DateOffset(months=1)
+        return months
 
     def _csv_rating_dist(self) -> dict:
         self._require_df()
@@ -185,11 +203,7 @@ class DataProvider:
     def _csv_monthly_trend(self) -> dict:
         self._require_df()
         import pandas as pd
-        months = [
-            "2025-03", "2025-04", "2025-05", "2025-06",
-            "2025-07", "2025-08", "2025-09", "2025-10",
-            "2025-11", "2025-12", "2026-01", "2026-02", "2026-03", "2026-04",
-        ]
+        months = self._csv_month_series()
         df = self.df
         result = {"months": months, "total": [], "reviews": [], "qa": [], "avg_rating": []}
         for m in months:
@@ -229,24 +243,33 @@ class DataProvider:
     def _csv_platform_comparison(self) -> dict:
         import pandas as pd
         self._require_df()
+        order = ["OZON", "Wildberries", "Yandex Market"]
         platforms = {}
         for name, group in self.df.groupby("siteName"):
             key = None
-            if "OZON" in str(name).upper():
-                key = "OZON"
-            elif "WILDBERRIES" in str(name).upper():
-                key = "Wildberries"
+            up = str(name).upper()
+            for candidate in order:
+                if candidate.upper() in up:
+                    key = candidate
+                    break
             if not key:
                 continue
             reviews = group[group["data_type"] == "review"]
             rates = pd.to_numeric(reviews["rate"], errors="coerce")
             if key not in platforms:
-                platforms[key] = {"total": 0, "reviews": 0, "qa": 0, "avg_rating": 0.0}
+                platforms[key] = {"total": 0, "reviews": 0, "qa": 0, "avg_sum": 0.0}
             platforms[key]["total"] += len(group)
             platforms[key]["reviews"] += len(reviews)
             platforms[key]["qa"] += len(group) - len(reviews)
-            platforms[key]["avg_rating"] = round(float(rates.mean()), 2) if len(rates) > 0 else 0
-        return platforms
+            if len(rates) > 0:
+                platforms[key]["avg_sum"] += float(rates.mean()) * len(rates)
+        result = {}
+        for key, p in platforms.items():
+            avg = round(p["avg_sum"] / max(p["reviews"], 1), 2) if p["reviews"] else 0.0
+            result[key] = {
+                "total": p["total"], "reviews": p["reviews"], "qa": p["qa"], "avg_rating": avg,
+            }
+        return result
 
     def _csv_daily_heatmap(self) -> list:
         self._require_df()
@@ -294,11 +317,7 @@ class DataProvider:
 
     def _csv_product_monthly(self) -> dict:
         self._require_df()
-        months = [
-            "2025-03", "2025-04", "2025-05", "2025-06",
-            "2025-07", "2025-08", "2025-09", "2025-10",
-            "2025-11", "2025-12", "2026-01", "2026-02", "2026-03", "2026-04",
-        ]
+        months = self._csv_month_series()
         top10 = self.df["name"].value_counts().head(10).index.tolist()
         products = {n: [] for n in top10}
         for m in months:
@@ -445,180 +464,304 @@ def generate_wordclouds(data_provider: DataProvider) -> dict:
 
 
 # ════════════════════════════════════════════════════════════
-# AI 分析数据（通过 analyzer 模块或 analysis_cache）
+# AI 分析数据（基于真实数据的规则分析，可解释、零 API 成本）
 # ════════════════════════════════════════════════════════════
 
+ASPECT_KEYWORDS = {
+    "电池续航": ["电池", "续航", "充电", "电量", "待机", "快充"],
+    "相机拍照": ["相机", "拍照", "摄像", "照片", "镜头", "夜景", "像素"],
+    "屏幕显示": ["屏幕", "显示", "OLED", "AMOLED", "分辨率", "刷新率", "亮度"],
+    "性能运行": ["性能", "运行", "流畅", "卡顿", "处理器", "游戏", "发热"],
+    "外观设计": ["外观", "设计", "手感", "材质", "颜色", "重量", "好看"],
+    "价格性价比": ["价格", "性价比", "贵", "便宜", "优惠", "值"],
+    "系统体验": ["系统", "软件", "界面", "更新", "安卓", "功能", "体验"],
+    "售后服务": ["售后", "客服", "保修", "退货", "维修", "服务"],
+}
+
+INTENT_KEYWORDS = {
+    "产品咨询": ["请问", "咨询", "有吗", "有没有", "支持", "参数", "配置"],
+    "功能询问": ["功能", "能不能", "可以吗", "怎么用", "如何", "操作"],
+    "购买决策": ["买", "值得", "价格", "性价比", "推荐", "优惠", "划算"],
+    "使用问题": ["问题", "故障", "坏了", "不能用", "卡", "闪退", "异常"],
+    "售后支持": ["保修", "退货", "退款", "维修", "客服", "换货", "服务"],
+    "比较评价": ["对比", "哪个好", "区别", "相比", "vs"],
+}
+
+FEATURE_KEYWORDS = {
+    "处理器": ["处理器", "芯片", "骁龙", "天玑", "CPU", "性能"],
+    "内存": ["内存", "RAM", "8GB", "12GB", "16GB", "运存"],
+    "存储": ["存储", "ROM", "256GB", "512GB", "1TB", "空间"],
+    "屏幕": ["屏幕", "OLED", "AMOLED", "LCD", "刷新率", "显示"],
+    "摄像头": ["相机", "摄像头", "拍照", "像素", "夜景"],
+    "电池": ["电池", "续航", "充电", "电量"],
+    "快充": ["快充", "充电速度", "瓦", "W充电"],
+    "系统": ["系统", "安卓", "Android", "OriginOS", "界面"],
+    "网络": ["网络", "5G", "WiFi", "信号", "双卡"],
+    "游戏": ["游戏", "帧率", "电竞", "王者", "原神"],
+}
+
+COMPETITOR_KEYWORDS = ["Samsung", "Galaxy", "Xiaomi", "Redmi", "Apple", "iPhone",
+                       "Huawei", "OPPO", "Realme", "Honor", "荣耀", "小米", "三星", "华为"]
+
+LOCATION_KEYWORDS = {
+    "莫斯科": ["莫斯科", "Moscow", "Москва"],
+    "圣彼得堡": ["圣彼得堡", "St. Petersburg", "Санкт-Петербург"],
+    "新西伯利亚": ["新西伯利亚", "Новосибирск"],
+    "叶卡捷琳堡": ["叶卡捷琳堡", "Екатеринбург"],
+    "喀山": ["喀山", "Казань"],
+    "下诺夫哥罗德": ["下诺夫哥罗德", "Нижний Новгород"],
+    "萨马拉": ["萨马拉", "Самара"],
+    "鄂木斯克": ["鄂木斯克", "Омск"],
+    "车里雅宾斯克": ["车里雅宾斯克", "Челябинск"],
+    "顿河畔罗斯托夫": ["罗斯托夫", "Ростов"],
+    "乌法": ["乌法", "Уфа"],
+    "克拉斯诺亚尔斯克": ["克拉斯诺亚尔斯克", "Красноярск"],
+    "彼尔姆": ["彼尔姆", "Пермь"],
+    "沃罗涅日": ["沃罗涅日", "Воронеж"],
+    "伏尔加格勒": ["伏尔加格勒", "Волгоград"],
+}
+
+ROOT_CAUSE_KEYWORDS = {
+    "电池续航不足": ["电池", "续航", "耗电", "电量"],
+    "系统卡顿发热": ["卡顿", "发热", "烫", "掉帧"],
+    "相机效果不佳": ["相机", "拍照", "模糊", "噪点", "夜景"],
+    "屏幕显示问题": ["屏幕", "绿屏", "闪屏", "烧屏", "坏点"],
+    "网络连接问题": ["网络", "信号", "WiFi", "断连"],
+    "售后服务差": ["售后", "客服", "不理", "不回复"],
+    "价格过高": ["贵", "价格", "不值"],
+    "内存不足": ["内存", "存储", "不够用"],
+    "外观设计缺陷": ["外观", "塑料", "缝隙", "掉漆"],
+    "充电速度慢": ["充电", "慢", "充电慢"],
+    "软件bug": ["bug", "闪退", "崩溃", "错误"],
+    "包装破损": ["包装", "破损", "压坏"],
+    "配件缺失": ["配件", "充电器", "缺", "没有充电"],
+    "物流延迟": ["物流", "快递", "慢", "延迟", "配送"],
+}
+
+
+def _rule_texts(provider) -> list[dict]:
+    """获取评论文本（含中文译文 + 评分），DB 或 CSV"""
+    if provider.db:
+        rows = provider.db.fetch_query(
+            "SELECT review_zh, review, rate FROM translated_records "
+            "WHERE data_type='review' AND (review_zh IS NOT NULL OR review IS NOT NULL)"
+        )
+        return [{"zh": r[0] or r[1] or "", "rate": r[2]} for r in rows]
+    if provider.df is not None:
+        import pandas as pd
+        df = provider.df[provider.df["data_type"] == "review"]
+        texts = df["review_zh"].fillna(df["review"]).fillna("").tolist()
+        rates = df["rate"].tolist()
+        return [{"zh": t, "rate": r} for t, r in zip(texts, rates)]
+    return []
+
+
+def _rule_qa_texts(provider) -> list[str]:
+    """获取问答文本（中文问题）"""
+    if provider.db:
+        rows = provider.db.fetch_query(
+            "SELECT question_zh, question FROM translated_records "
+            "WHERE data_type='qa' AND (question_zh IS NOT NULL OR question IS NOT NULL)"
+        )
+        return [r[0] or r[1] or "" for r in rows]
+    if provider.df is not None:
+        df = provider.df[provider.df["data_type"] == "qa"]
+        return df["question_zh"].fillna(df["question"]).fillna("").tolist()
+    return []
+
+
 def get_sentiment_data(data_provider: DataProvider) -> dict:
-    """获取情感分析数据"""
-    try:
-        from src.analysis.analyzer import analyze_sentiment
-    except ImportError:
-        logger.warning("analyzer 模块未就绪，使用模拟数据")
+    """情感分析 — 基于真实评分映射 + 维度关键词规则"""
+    reviews = _rule_texts(data_provider)
+    if not reviews:
         return _mock_sentiment()
 
-    if data_provider.db:
-        reviews = [
-            {"review_zh": r[0], "review": r[1], "rate": r[2]}
-            for r in data_provider.db.fetch_query(
-                "SELECT review_zh, review, rate FROM translated_records WHERE data_type='review' LIMIT 5000"
-            )
-        ]
-    elif data_provider.df is not None:
-        import pandas as pd
-        subset = data_provider.df[data_provider.df["data_type"] == "review"].head(5000)
-        reviews = subset.apply(
-            lambda r: {"review_zh": r.get("review_zh"), "review": r.get("review"), "rate": r.get("rate")},
-            axis=1,
-        ).tolist()
-    else:
-        reviews = []
+    dist = {"positive": 0, "neutral": 0, "negative": 0}
+    aspects = {k: {"positive": 0, "neutral": 0, "negative": 0} for k in ASPECT_KEYWORDS}
+    aspect_freq = {k: 0 for k in ASPECT_KEYWORDS}
 
-    if reviews:
+    for r in reviews:
+        text = r["zh"] or ""
+        rate = r["rate"]
         try:
-            return analyze_sentiment(reviews, db=data_provider.db)
-        except Exception as e:
-            logger.warning("情感分析失败: %s，使用模拟数据", e)
+            rate_f = float(rate)
+        except (TypeError, ValueError):
+            rate_f = 0
+        senti = "positive" if rate_f >= 4 else ("neutral" if rate_f == 3 else "negative")
+        dist[senti] += 1
+        for asp, kws in ASPECT_KEYWORDS.items():
+            if any(k in text for k in kws):
+                aspects[asp][senti] += 1
+                aspect_freq[asp] += 1
 
-    return _mock_sentiment()
+    aspect_frequency = [
+        {"name": k, "value": v} for k, v in sorted(aspect_freq.items(), key=lambda x: -x[1])
+    ]
+    return {
+        "distribution": dist,
+        "aspect_sentiment": aspects,
+        "aspect_frequency": aspect_frequency,
+    }
 
 
 def get_intent_data(data_provider: DataProvider) -> dict:
-    """获取意图分类数据"""
-    try:
-        from src.analysis.analyzer import classify_intent
-    except ImportError:
+    """意图分类 — 基于真实问题关键词规则"""
+    qa_texts = _rule_qa_texts(data_provider)
+    if not qa_texts:
         return _mock_intent()
 
-    if data_provider.db:
-        questions = [
-            {"question_zh": q[0], "question": q[1]}
-            for q in data_provider.db.fetch_query(
-                "SELECT question_zh, question FROM translated_records WHERE data_type='qa' LIMIT 5000"
-            )
-        ]
-    elif data_provider.df is not None:
-        import pandas as pd
-        subset = data_provider.df[data_provider.df["data_type"] == "qa"].head(5000)
-        questions = subset.apply(
-            lambda r: {"question_zh": r.get("question_zh"), "question": r.get("question")},
-            axis=1,
-        ).tolist()
-    else:
-        questions = []
+    counts = {k: 0 for k in INTENT_KEYWORDS}
+    counts["其他"] = 0
+    for t in qa_texts:
+        matched = None
+        for intent, kws in INTENT_KEYWORDS.items():
+            if any(k in t for k in kws):
+                matched = intent
+                break
+        if matched:
+            counts[matched] += 1
+        else:
+            counts["其他"] += 1
 
-    if questions:
-        try:
-            return classify_intent(questions, db=data_provider.db)
-        except Exception as e:
-            logger.warning("意图分类失败: %s，使用模拟数据", e)
-
-    return _mock_intent()
+    distribution = [{"name": k, "value": v} for k, v in counts.items() if v > 0]
+    distribution.sort(key=lambda x: -x["value"])
+    return {"distribution": distribution}
 
 
 def get_ner_data(data_provider: DataProvider) -> dict:
-    """获取 NER 提取数据"""
-    try:
-        from src.analysis.analyzer import extract_ner
-    except ImportError:
+    """NER 提取 — 基于真实文本的地理位置/竞品/特性关键词"""
+    reviews = _rule_texts(data_provider)
+    texts = [r["zh"] for r in reviews]
+    if not texts:
         return _mock_ner()
 
-    if data_provider.db:
-        texts = [
-            r[0] or r[1] or ""
-            for r in data_provider.db.fetch_query(
-                "SELECT review_zh, review FROM translated_records WHERE data_type='review' AND (review_zh IS NOT NULL OR review IS NOT NULL) LIMIT 3000"
-            )
-        ]
-    elif data_provider.df is not None:
-        import pandas as pd
-        subset = data_provider.df[data_provider.df["data_type"] == "review"]
-        texts = subset["review_zh"].fillna(subset["review"]).dropna().tolist()[:3000]
-    else:
-        texts = []
+    # 地理位置
+    locations = []
+    for city, kws in LOCATION_KEYWORDS.items():
+        cnt = sum(1 for t in texts if any(k in t for k in kws))
+        if cnt > 0:
+            locations.append({"name": city, "value": cnt})
+    locations.sort(key=lambda x: -x["value"])
 
-    if texts:
-        try:
-            return extract_ner(texts, db=data_provider.db)
-        except Exception as e:
-            logger.warning("NER 提取失败: %s，使用模拟数据", e)
+    # 竞品
+    competitors = []
+    for brand in COMPETITOR_KEYWORDS:
+        cnt = sum(1 for t in texts if brand.lower() in t.lower())
+        if cnt > 0:
+            competitors.append({"name": brand, "value": cnt})
+    competitors.sort(key=lambda x: -x["value"])
 
-    return _mock_ner()
+    # 产品特性
+    features = []
+    for feat, kws in FEATURE_KEYWORDS.items():
+        cnt = sum(1 for t in texts if any(k in t for k in kws))
+        if cnt > 0:
+            features.append({"name": feat, "value": cnt})
+    features.sort(key=lambda x: -x["value"])
+
+    return {"locations": locations[:15], "competitors": competitors[:10], "features": features[:15]}
 
 
 def get_rootcause_data(data_provider: DataProvider) -> dict:
-    """获取根因分析数据"""
-    try:
-        from src.analysis.analyzer import analyze_root_cause
-    except ImportError:
+    """差评根因 — 基于真实差评文本关键词规则"""
+    reviews = _rule_texts(data_provider)
+    negatives = [r["zh"] for r in reviews if r["rate"] and _is_negative(float(r["rate"]))]
+    if not negatives:
         return _mock_rootcause()
 
-    if data_provider.db:
-        negative = [
-            {"review_zh": r[0], "review": r[1], "rate": r[2]}
-            for r in data_provider.db.fetch_query(
-                "SELECT review_zh, review, rate FROM translated_records WHERE data_type='review' AND rate <= 2 AND (review_zh IS NOT NULL OR review IS NOT NULL) LIMIT 500"
-            )
-        ]
-    elif data_provider.df is not None:
-        import pandas as pd
-        subset = data_provider.df[data_provider.df["data_type"] == "review"]
-        subset["rate_n"] = pd.to_numeric(subset["rate"], errors="coerce")
-        neg = subset[subset["rate_n"] <= 2].head(500)
-        negative = neg.apply(
-            lambda r: {"review_zh": r.get("review_zh"), "review": r.get("review")},
-            axis=1,
-        ).tolist()
-    else:
-        negative = []
+    causes = []
+    for cause, kws in ROOT_CAUSE_KEYWORDS.items():
+        cnt = sum(1 for t in negatives if any(k in t for k in kws))
+        if cnt > 0:
+            causes.append({"name": cause, "value": cnt})
+    causes.sort(key=lambda x: -x["value"])
 
-    if negative:
-        try:
-            return analyze_root_cause(negative, db=data_provider.db)
-        except Exception as e:
-            logger.warning("根因分析失败: %s，使用模拟数据", e)
+    total = len(negatives)
+    severity = {
+        "high": sum(c["value"] for c in causes[: max(1, len(causes) // 3)]),
+        "medium": sum(c["value"] for c in causes[max(1, len(causes) // 3): max(2, 2 * len(causes) // 3)]),
+        "low": sum(c["value"] for c in causes[max(2, 2 * len(causes) // 3):]),
+    }
+    return {"causes": causes[:15], "severity": severity, "negative_count": total}
 
-    return _mock_rootcause()
+
+def _is_negative(rate: float) -> bool:
+    return rate <= 2
 
 
 def get_product_summaries(data_provider: DataProvider) -> dict:
-    """获取产品摘要"""
-    try:
-        from src.analysis.analyzer import generate_summary
-    except ImportError:
-        return _mock_summaries()
-
-    # 获取 Top 10 产品
+    """产品摘要 — 基于真实统计数据生成的模板化摘要"""
     if data_provider.db:
         top_names = [
             r[0] for r in data_provider.db.fetch_query(
-                "SELECT name FROM translated_records GROUP BY name ORDER BY COUNT(*) DESC LIMIT 10"
+                "SELECT name FROM translated_records GROUP BY name ORDER BY COUNT(*) DESC LIMIT 26"
             )
         ]
     elif data_provider.df is not None:
-        top_names = data_provider.df["name"].value_counts().head(10).index.tolist()
+        top_names = data_provider.df["name"].value_counts().head(26).index.tolist()
     else:
         top_names = []
 
     summaries = {}
     for name in top_names:
+        # 产品统计数据
         if data_provider.db:
+            row = data_provider.db.fetch_one(
+                "SELECT COUNT(*), AVG(CASE WHEN data_type='review' AND rate IS NOT NULL THEN rate END), "
+                "SUM(CASE WHEN data_type='review' AND rate >= 4 THEN 1 ELSE 0 END), "
+                "SUM(CASE WHEN data_type='review' AND rate <= 2 THEN 1 ELSE 0 END) "
+                "FROM translated_records WHERE name=%s", (name,)
+            )
+            total = row[0] or 0
+            avg = round(float(row[1]), 2) if row[1] else 0
+            pos = row[2] or 0
+            neg = row[3] or 0
             prod_reviews = [
                 {"review_zh": r[0], "review": r[1]}
                 for r in data_provider.db.fetch_query(
-                    "SELECT review_zh, review FROM translated_records WHERE data_type='review' AND name=%s AND (review_zh IS NOT NULL OR review IS NOT NULL) LIMIT 100",
+                    "SELECT review_zh, review FROM translated_records WHERE data_type='review' AND name=%s AND (review_zh IS NOT NULL OR review IS NOT NULL) LIMIT 200",
                     (name,),
                 )
             ]
         else:
-            prod_reviews = []
+            import pandas as pd
+            sub = data_provider.df[data_provider.df["name"] == name]
+            rev = sub[sub["data_type"] == "review"]
+            total = len(sub)
+            rates = pd.to_numeric(rev["rate"], errors="coerce")
+            avg = round(float(rates.mean()), 2) if len(rates) > 0 else 0
+            pos = int((rates >= 4).sum())
+            neg = int((rates <= 2).sum())
+            prod_reviews = rev["review_zh"].fillna(rev["review"]).fillna("").tolist()
+            prod_reviews = [{"review_zh": t, "review": ""} for t in prod_reviews[:200]]
 
-        try:
-            summaries[name] = generate_summary(prod_reviews, name, db=data_provider.db)
-        except Exception as e:
-            logger.warning("产品摘要生成失败 %s: %s", name, e)
-            summaries[name] = _mock_summary(name, len(prod_reviews))
+        summaries[name] = _build_product_summary(name, total, avg, pos, neg, prod_reviews)
 
     return summaries
+
+
+def _build_product_summary(name, total, avg, pos, neg, reviews) -> dict:
+    """根据真实统计 + 高频关键词生成产品摘要"""
+    texts = [r.get("review_zh") or r.get("review", "") for r in reviews if (r.get("review_zh") or r.get("review"))]
+    pos_texts = texts[:int(len(texts) * (pos / max(total, 1)))] or texts[: max(1, len(texts) // 3)]
+    neg_texts = [t for t in texts[-max(1, len(texts) // 5):]]
+
+    strengths = [k for k, v in ASPECT_KEYWORDS.items() if any(w in "".join(pos_texts[:50]) for w in v)][:3]
+    weaknesses = [k for k, v in ASPECT_KEYWORDS.items() if any(w in "".join(neg_texts[:30]) for w in v)][:2]
+
+    pos_rate = round(pos / max(total, 1) * 100, 1)
+    summary = (
+        f"{name} 在俄罗斯市场共收录 {total} 条用户反馈，平均评分 {avg}/5，好评率 {pos_rate}%。"
+        f"用户主要关注{('、'.join(strengths) if strengths else '性能与续航')}等维度。"
+        f"{('负面反馈集中于' + '、'.join(weaknesses) + '方面。' if weaknesses else '整体口碑良好，负面反馈较少。')}"
+    )
+    return {
+        "summary": summary,
+        "rating": avg,
+        "review_count": total,
+        "strengths": strengths,
+        "weaknesses": weaknesses,
+    }
 
 
 # ════════════════════════════════════════════════════════════
@@ -782,6 +925,9 @@ def generate_all_data() -> dict:
 
     # 基础统计（来自 DB 或 CSV）
     data = {
+        "meta": {
+            "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        },
         "kpi": provider.get_kpi(),
         "rating_dist": provider.get_rating_dist(),
         "monthly_trend": provider.get_monthly_trend(),

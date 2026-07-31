@@ -209,6 +209,8 @@ function initProducts(){
       <div class="psummary">${escapeHtml(cleanSummary)||'摘要生成中...'}</div>
       <div class="pbar"><div class="pbar-fill" style="width:${(p.total/D.product_ranking[0].total*100)}%"></div></div>`;
     card.addEventListener('click',()=>showProductModal(p.name));
+    card.style.opacity='0';card.style.transform='translateY(10px)';
+    setTimeout(()=>{card.style.transition='opacity .5s ease, transform .5s ease';card.style.opacity='1';card.style.transform='translateY(0)'},i*40);
     grid.appendChild(card);
   });
 
@@ -361,11 +363,14 @@ function initTimeline(){
   const heatData=D.daily_heatmap||[];
   if(heatData.length>0){
     const maxH=Math.max(1,...heatData.map(d=>d[1]));
+    const calRange=(D.kpi&&D.kpi.date_range_start&&D.kpi.date_range_end)
+      ? [D.kpi.date_range_start,D.kpi.date_range_end]
+      : (heatData.length>0?[heatData[0][0].slice(0,7),heatData[heatData.length-1][0].slice(0,7)]:['2025-03','2026-05']);
     initChart('tlHeatmap').setOption({...baseOpt(),tooltip:{formatter:p=>`${p.value[0]}<br>评论数: ${p.value[1]}`},
       visualMap:{min:0,max:maxH,calculable:true,orient:'horizontal',left:'center',bottom:0,
         inRange:{color:['rgba(60,35,90,0.1)','rgba(196,160,224,0.3)','rgba(224,168,200,0.7)',PAL[1]]},
         textStyle:{color:'rgba(200,180,220,0.4)',fontSize:10}},
-      calendar:{range:['2025-03','2026-05'],top:30,left:50,right:30,cellSize:['auto',14],
+      calendar:{range:calRange,top:30,left:50,right:30,cellSize:['auto',14],
         yearLabel:{show:false},monthLabel:{color:'rgba(200,180,220,0.4)',fontSize:10},
         dayLabel:{color:'rgba(200,180,220,0.3)',fontSize:9,firstDay:1},
         splitLine:{lineStyle:{color:'rgba(200,180,220,0.06)'}},itemStyle:{borderColor:'rgba(12,9,22,0.6)',borderWidth:1}},
@@ -373,19 +378,7 @@ function initTimeline(){
   }
 
   // Trend with dataZoom
-  initChart('tlTrend').setOption({...baseOpt(),tooltip:{trigger:'axis'},
-    legend:{data:['评论量','问答量','平均评分'],textStyle:{color:'rgba(200,180,220,0.4)',fontSize:10},top:0},
-    dataZoom:[{type:'slider',start:0,end:100,bottom:5,height:20,
-      borderColor:'rgba(180,140,220,0.15)',fillerColor:'rgba(180,140,220,0.08)',
-      handleStyle:{color:PAL[0]},textStyle:{color:'rgba(200,180,220,0.4)',fontSize:10},
-      dataBackground:{lineStyle:{color:PAL[0]+'40'},areaStyle:{color:PAL[0]+'10'}}}],
-    xAxis:{type:'category',data:D.monthly_trend.months,axisLabel:{fontSize:10,rotate:30}},
-    yAxis:[{type:'value',splitLine:{lineStyle:{color:PAL[0]+'10'}}},{type:'value',min:4,max:5,splitLine:{show:false}}],
-    series:[
-      {name:'评论量',type:'bar',data:D.monthly_trend.reviews,itemStyle:{color:PAL[0],borderRadius:[3,3,0,0]},barMaxWidth:18},
-      {name:'问答量',type:'bar',data:D.monthly_trend.qa,itemStyle:{color:PAL[1],borderRadius:[3,3,0,0]},barMaxWidth:18},
-      {name:'平均评分',type:'line',yAxisIndex:1,data:D.monthly_trend.avg_rating,smooth:true,lineStyle:{color:PAL[2],width:2},itemStyle:{color:PAL[2]}},
-    ]});
+  renderTimelineTrend(initChart('tlTrend'), D.monthly_trend.months);
 
   // Length distribution
   initChart('tlLength').setOption({...baseOpt(),tooltip:{trigger:'axis'},
@@ -394,17 +387,39 @@ function initTimeline(){
     series:[{type:'bar',data:D.review_length_dist.values,
       itemStyle:{color:{type:'linear',x:0,y:0,x2:0,y2:1,colorStops:[{offset:0,color:PAL[2]},{offset:1,color:PAL[2]+'30'}]},borderRadius:[3,3,0,0]},barMaxWidth:30}]});
 
-  // Time slider
+  // Time slider — 实际过滤月度趋势图
   const slider=document.getElementById('timeSlider');
   const label=document.getElementById('timeLabel');
   const months=D.monthly_trend.months;
   if(slider&&months){
     slider.max=months.length-1;slider.value=months.length-1;
+    label.textContent=`${months[0]} ~ ${months[months.length-1]}`;
     slider.addEventListener('input',()=>{
       const idx=parseInt(slider.value);
       label.textContent=`${months[0]} ~ ${months[idx]}`;
+      const cTL=chartInstances['tlTrend'];
+      if(cTL&&!cTL.isDisposed())renderTimelineTrend(cTL,months.slice(0,idx+1));
     });
   }
+}
+
+/* 渲染时间轴趋势图（可复用，用于滑块过滤） */
+function renderTimelineTrend(chart,months){
+  if(!chart)return;
+  const mt=D.monthly_trend;
+  chart.setOption({...baseOpt(),tooltip:{trigger:'axis'},
+    legend:{data:['评论量','问答量','平均评分'],textStyle:{color:'rgba(200,180,220,0.4)',fontSize:10},top:0},
+    dataZoom:[{type:'slider',start:0,end:100,bottom:5,height:20,
+      borderColor:'rgba(180,140,220,0.15)',fillerColor:'rgba(180,140,220,0.08)',
+      handleStyle:{color:PAL[0]},textStyle:{color:'rgba(200,180,220,0.4)',fontSize:10},
+      dataBackground:{lineStyle:{color:PAL[0]+'40'},areaStyle:{color:PAL[0]+'10'}}}],
+    xAxis:{type:'category',data:months,axisLabel:{fontSize:10,rotate:30}},
+    yAxis:[{type:'value',splitLine:{lineStyle:{color:PAL[0]+'10'}}},{type:'value',min:4,max:5,splitLine:{show:false}}],
+    series:[
+      {name:'评论量',type:'bar',data:mt.reviews.slice(0,months.length),itemStyle:{color:PAL[0],borderRadius:[3,3,0,0]},barMaxWidth:18},
+      {name:'问答量',type:'bar',data:mt.qa.slice(0,months.length),itemStyle:{color:PAL[1],borderRadius:[3,3,0,0]},barMaxWidth:18},
+      {name:'平均评分',type:'line',yAxisIndex:1,data:mt.avg_rating.slice(0,months.length),smooth:true,lineStyle:{color:PAL[2],width:2},itemStyle:{color:PAL[2]}},
+    ]});
 }
 
 /* ═══════════════════════════════════
@@ -493,10 +508,11 @@ function initDiagnosis(){
   // Negative review stream
   const reviewStream=document.getElementById('diagReviews');
   const negWords=D.wordcloud_negative||[];
+  const rc=D.rootcause||{};
   if(negWords.length>0){
     reviewStream.innerHTML=`
       <div style="padding:12px;text-align:center;color:var(--text-dim);font-size:12px">
-        <p style="margin-bottom:12px">差评核心关键词 TOP 10</p>
+        <p style="margin-bottom:12px">差评核心关键词 TOP 10${rc.negative_count?` <span style="color:var(--negative);font-weight:700">· 差评样本 ${Number(rc.negative_count).toLocaleString()} 条</span>`:''}</p>
         ${negWords.slice(0,10).map((w,i)=>`
           <div class="review-item negative" style="text-align:left;display:flex;justify-content:space-between">
             <span>#${i+1} ${escapeHtml(w.name)}</span><span style="color:var(--negative)">${w.value} 次</span>
