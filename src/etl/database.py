@@ -395,7 +395,7 @@ class Database:
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
         params = tuple(
-            self._nan_to_none(record.get(k))
+            self._sanitize_field(k, record.get(k))
             for k in [
                 "data_type", "source_file", "author", "publishDate", "rate",
                 "question", "answer", "review", "name", "SKU", "URL", "siteName",
@@ -420,8 +420,23 @@ class Database:
             "question", "answer", "review", "name", "SKU", "URL", "siteName",
             "question_zh", "question_en", "answer_zh", "answer_en", "review_zh", "review_en",
         ]
-        params = [tuple(self._nan_to_none(rec.get(k)) for k in keys) for rec in records]
+        params = [
+            tuple(self._sanitize_field(k, v) for k, v in ((key, rec.get(key)) for key in keys))
+            for rec in records
+        ]
         return self.execute_many(sql, params)
+
+    @staticmethod
+    def _sanitize_field(key: str, value):
+        """入库前清洗字段：截断超长 VARCHAR 字段，防止 Data too long 错误"""
+        value = Database._nan_to_none(value)
+        if value is None:
+            return None
+        # VARCHAR(255) 字段：author/name/sku/site_name/source_file
+        if key in ("author", "name", "SKU", "siteName", "source_file", "data_type"):
+            s = str(value)
+            return s[:255] if len(s) > 255 else s
+        return value
 
     # ════════════════════════════════════════════════════════════
     # 分析缓存

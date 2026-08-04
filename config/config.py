@@ -31,11 +31,15 @@ DATA_PATHS = {
         "原始数据/ozon_reviews1.xlsx",
         "原始数据/ozon_reviews2.xlsx",
         "原始数据/ozon_reviews3.xlsx",
+        "原始数据/ozon_reviews4.xlsx",
+        "原始数据/ozon_reviews5.xlsx",
     ],
     "ozon_questions": [
         "原始数据/ozon_questions.xlsx",
         "原始数据/ozon_questions2.xlsx",
         "原始数据/ozon_questions3.xlsx",
+        "原始数据/ozon_questions4.xlsx",
+        "原始数据/ozon_questions5.xlsx",
     ],
     "wildberries_reviews": [
         "原始数据/wildberries_reviews.xlsx",
@@ -43,6 +47,8 @@ DATA_PATHS = {
         "原始数据/wildberries_reviews2.xlsx",
         "原始数据/wildberries_reviews3.xlsx",
         "原始数据/wildberries_reviews4.xlsx",
+        "原始数据/wildberries_reviews5.xlsx",
+        "原始数据/wildberries_reviews6.xlsx",
     ],
     "wildberries_questions": [
         "原始数据/wildberries_qa.xlsx",
@@ -50,6 +56,8 @@ DATA_PATHS = {
         "原始数据/wildberries_qa2.xlsx",
         "原始数据/wildberries_qa3.xlsx",
         "原始数据/wildberries_qa4.xlsx",
+        "原始数据/wildberries_qa5.xlsx",
+        "原始数据/wildberries_qa6.xlsx",
     ],
     "yandex_reviews": [
         "原始数据/yandex_reviews4.xlsx",

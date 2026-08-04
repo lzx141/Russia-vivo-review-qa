@@ -2,7 +2,9 @@ import pandas as pd
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.options import Options as ChromeOptions
+from selenium.webdriver.edge.options import Options as EdgeOptions
+from selenium.webdriver.edge.service import Service as EdgeService
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import time
@@ -10,6 +12,75 @@ import random
 from selenium.common.exceptions import NoSuchElementException, TimeoutException
 import os
 import dateparser
+
+
+def _create_driver(headless: bool = True):
+    """
+    创建浏览器驱动（优先 Edge，Chrome 兜底）
+
+    本机未安装 Google Chrome 时使用系统自带 Microsoft Edge（Chromium 内核），
+    服务器 / GitHub Actions 环境则自动回退到 Chrome。
+    headless=True 时使用无头模式（更快，适合批量爬取）。
+    """
+    common_args = [
+        "--lang=ru-RU",
+        "--disable-blink-features=AutomationControlled",
+        "--disable-web-security",
+        "--disable-features=IsolateOrigins,site-per-process",
+        "--disable-gpu",
+        "--no-sandbox",
+        "--disable-dev-shm-usage",
+        "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.6478.127 Safari/537.36",
+    ]
+    if headless:
+        common_args.append("--headless=new")
+
+    # 优先尝试 Edge（本机有）
+    try:
+        edge_path = None
+        for p in [
+            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+            r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+            "/usr/bin/microsoft-edge",
+            "/usr/bin/microsoft-edge-stable",
+        ]:
+            if os.path.exists(p):
+                edge_path = p
+                break
+        if edge_path:
+            edge_opts = EdgeOptions()
+            for arg in common_args:
+                edge_opts.add_argument(arg)
+            edge_opts.add_experimental_option("excludeSwitches", ["enable-automation"])
+            edge_opts.add_experimental_option("useAutomationExtension", False)
+            driver = webdriver.Edge(service=EdgeService(), options=edge_opts)
+            _inject_anti_detect(driver)
+            return driver
+    except Exception as e:
+        print(f"⚠️ Edge 驱动初始化失败，尝试 Chrome: {e}")
+
+    # 回退 Chrome
+    chrome_opts = ChromeOptions()
+    for arg in common_args:
+        chrome_opts.add_argument(arg)
+    chrome_opts.add_experimental_option("excludeSwitches", ["enable-automation"])
+    chrome_opts.add_experimental_option("useAutomationExtension", False)
+    driver = webdriver.Chrome(service=Service(), options=chrome_opts)
+    _inject_anti_detect(driver)
+    return driver
+
+
+def _inject_anti_detect(driver):
+    """注入反爬虫检测脚本"""
+    driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
+        "source": """
+        delete navigator.__proto__.webdriver;
+        window.chrome = {runtime: {}};
+        Object.defineProperty(navigator, 'languages', {get: () => ['ru-RU', 'ru']});
+        Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
+        """
+    })
 
 
 def _is_search_redirect_page(driver) -> bool:
@@ -40,7 +111,7 @@ def _click_product_card_to_detail(driver, model_name: str, wait: WebDriverWait) 
     """
     try:
         # 等待商品卡片链接加载
-        time.sleep(random.uniform(3, 5))
+        time.sleep(random.uniform(2, 3))
         links = driver.find_elements(By.XPATH, '//a[contains(@href, "/product/")]')
         if not links:
             print("⚠️ 搜索页未找到商品卡片链接")
@@ -72,7 +143,7 @@ def _click_product_card_to_detail(driver, model_name: str, wait: WebDriverWait) 
 
         # 点击进入详情页
         driver.execute_script("arguments[0].click();", matched)
-        time.sleep(random.uniform(6, 9))
+        time.sleep(random.uniform(3, 5))
 
         # 验证是否进入详情页
         if not _is_search_redirect_page(driver):
@@ -82,7 +153,7 @@ def _click_product_card_to_detail(driver, model_name: str, wait: WebDriverWait) 
                 sep = "&" if "?" in current else "?"
                 detail_url = current.split("#")[0] + sep + "sort=published_at_desc"
                 driver.get(detail_url)
-                time.sleep(random.uniform(6, 9))
+                time.sleep(random.uniform(3, 5))
             print(f"✅ 已进入商品详情页: {driver.current_url[:80]}")
             return True
         else:
@@ -116,34 +187,13 @@ def crawl_ozon_reviews_by_url(product_url: str, model_name: str = "Unknown Model
     """
     if not product_url:
         return []
-    
-    chrome_options = Options()
-    chrome_options.add_argument("--lang=ru-RU")
-    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    chrome_options.add_experimental_option('useAutomationExtension', False)
-    chrome_options.add_argument("--disable-web-security")
-    chrome_options.add_argument("--disable-features=IsolateOrigins,site-per-process")
-    chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.6478.127 Safari/537.36")
-    
-    service = Service()
-    driver = webdriver.Chrome(service=service, options=chrome_options)
-    driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
-        "source": """
-        delete navigator.__proto__.webdriver;
-        window.chrome = {runtime: {}};
-        Object.defineProperty(navigator, 'languages', {get: () => ['ru-RU', 'ru']});
-        Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
-        """
-    })
+
+    driver = _create_driver(headless=False)
     wait = WebDriverWait(driver, 15)
     
     print(f"正在打开商品页面: {product_url}")
     driver.get(product_url)
-    time.sleep(random.uniform(10, 15))
+    time.sleep(random.uniform(5, 8))
 
     # 若被重定向到搜索页（商品售罄），自动点击进入商品详情页
     _ensure_detail_page(driver, model_name, wait)
@@ -154,7 +204,7 @@ def crawl_ozon_reviews_by_url(product_url: str, model_name: str = "Unknown Model
             EC.presence_of_element_located((By.XPATH, '//span[contains(text(), "Отзывы о товаре")]'))
         )
         driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", reviews_section)
-        time.sleep(random.uniform(2, 3))
+        time.sleep(random.uniform(1, 2))
         print("✅ 已滚动到评论区域")
     except Exception as e:
         print(f"⚠️ 未找到评论区域: {e}")
@@ -209,7 +259,7 @@ def crawl_ozon_reviews_by_url(product_url: str, model_name: str = "Unknown Model
             driver.execute_script(
                 "arguments[0].scrollIntoView({block: 'center'});", last_review
             )
-            time.sleep(random.uniform(2.5, 4.0))
+            time.sleep(random.uniform(1.5, 2.5))
         
         try:
             all_review_containers = driver.find_elements(
@@ -350,33 +400,12 @@ def crawl_ozon_qa_by_url(product_url: str, model_name: str = "Unknown Model",
     if not product_url:
         return []
 
-    chrome_options = Options()
-    chrome_options.add_argument("--lang=ru-RU")
-    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    chrome_options.add_experimental_option('useAutomationExtension', False)
-    chrome_options.add_argument("--disable-web-security")
-    chrome_options.add_argument("--disable-features=IsolateOrigins,site-per-process")
-    chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.6478.127 Safari/537.36")
-
-    service = Service()
-    driver = webdriver.Chrome(service=service, options=chrome_options)
-    driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
-        "source": """
-        delete navigator.__proto__.webdriver;
-        window.chrome = {runtime: {}};
-        Object.defineProperty(navigator, 'languages', {get: () => ['ru-RU', 'ru']});
-        Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
-        """
-    })
+    driver = _create_driver(headless=False)
     wait = WebDriverWait(driver, 15)
 
     print(f"正在打开商品页面: {product_url}")
     driver.get(product_url)
-    time.sleep(random.uniform(10, 15))
+    time.sleep(random.uniform(5, 8))
 
     # 若被重定向到搜索页（商品售罄），自动点击进入商品详情页
     _ensure_detail_page(driver, model_name, wait)
@@ -387,7 +416,7 @@ def crawl_ozon_qa_by_url(product_url: str, model_name: str = "Unknown Model",
             EC.presence_of_element_located((By.XPATH, '//span[contains(text(), "Отзывы о товаре")]'))
         )
         driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", reviews_section)
-        time.sleep(random.uniform(2, 3))
+        time.sleep(random.uniform(1, 2))
         print("✅ 已滚动到评论区域")
     except Exception as e:
         print(f"⚠️ 未找到评论区域: {e}")
@@ -404,7 +433,7 @@ def crawl_ozon_qa_by_url(product_url: str, model_name: str = "Unknown Model",
         )
         driver.execute_script("arguments[0].click();", qa_button)
         print("✅ 已点击'Вопросы'按钮")
-        time.sleep(random.uniform(4, 6))
+        time.sleep(random.uniform(2, 3))
     except Exception as e:
         print(f"⚠️ 无法点击'Вопросы'按钮: {e}")
 
@@ -532,7 +561,7 @@ def crawl_ozon_qa_by_url(product_url: str, model_name: str = "Unknown Model",
             )
             driver.execute_script("arguments[0].click();", btn)
             print(f"✅ 点击'加载更多'按钮，第 {round_clicks + 1} 次")
-            time.sleep(random.uniform(3, 5))
+            time.sleep(random.uniform(2, 3))
             qa_pairs.extend(extract_current_qa())
             round_clicks += 1
         except (NoSuchElementException, TimeoutException):
@@ -624,18 +653,14 @@ def save_data_to_file(data, file_path, data_type):
     
     new_df = temp_df.reindex(columns=required_columns)
 
-    if 'publishDate' in new_df.columns and data_type == 'reviews':
+    # 数据已在 crawl_* 函数中按传入的日期范围过滤，这里不做二次月份过滤
+    if 'publishDate' in new_df.columns:
         new_df['publishDate'] = pd.to_datetime(new_df['publishDate'], errors='coerce')
-        # 按当前目标月份（上月）过滤，与 crawl_from_excel 的日期范围保持一致
-        target_start, target_end = _default_last_month()
-        target_start_dt = pd.to_datetime(target_start)
-        target_end_dt = pd.to_datetime(target_end)
-        new_df = new_df[new_df['publishDate'].between(target_start_dt, target_end_dt)]
-
+        # 仅丢弃无效日期，保留有效记录
+        new_df = new_df[new_df['publishDate'].notna()]
         if new_df.empty:
-            print(f"⚠️ 没有{target_start} ~ {target_end}的{data_type}数据，无法创建或更新文件。")
+            print(f"⚠️ 没有有效的 {data_type} 数据（日期解析失败），无法创建或更新文件。")
             return
-
         new_df['publishDate'] = new_df['publishDate'].dt.strftime('%Y-%m-%d %H:%M')
     
     if os.path.exists(file_path):
