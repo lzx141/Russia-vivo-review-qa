@@ -41,7 +41,7 @@ function initOverview(){
     setTimeout(()=>{
       const vel=d.querySelector('.val');
       animNum(vel,k.value);
-      if(k.suffix)setTimeout(()=>{vel.textContent+=`<span class="unit">%</span>`},1100);
+      if(k.suffix)setTimeout(()=>{vel.insertAdjacentText('beforeend','%')},1100);
     },80);
   });
 
@@ -292,32 +292,42 @@ function initGeography(){
     // 将城市数据映射为坐标格式
     const cityData = locs.map(loc => {
       const city = RUSSIA_CITIES.find(c => c.name===loc.name);
-      return city ? {name:loc.name, value:[...city.value.slice(0,2), loc.value]} : null;
+      return city ? {name:loc.name, value:[city.value[0], city.value[1], loc.value]} : null;
     }).filter(Boolean);
 
     if(cityData.length>0){
       const cGeo=initChart('geoChart');
+      const maxVal=Math.max(1,...cityData.map(d=>d.value[2]));
       cGeo.setOption({
-        tooltip:{trigger:'item',formatter:p=>`${p.name}<br/>提及次数: ${p.value[2]}`},
-        visualMap:{
-          min:0,max:Math.max(...cityData.map(d=>d.value[2])),
-          text:['高','低'],realtime:false,calculable:true,
-          inRange:{color:['rgba(22,27,34,0.1)','#58a6ff','#f778ba']},
-          textStyle:{color:'rgba(145,152,161,0.4)'}
-        },
+        backgroundColor:'transparent',
+        tooltip:{trigger:'item',formatter:p=>`${p.name}<br/>提及次数: ${p.value[2]}`,backgroundColor:'#161b22',borderColor:'#30363d',textStyle:{color:'#e6edf3',fontSize:12}},
         geo:{
-          map:'俄罗斯',roam:true,zoom:1.2,center:[65,60],
-          itemStyle:{areaColor:'rgba(22,27,34,0.15)',borderColor:'rgba(110,118,129,0.15)',borderWidth:1},
-          emphasis:{itemStyle:{areaColor:'rgba(110,118,129,0.3)'}},
-          label:{show:false}
+          map:'俄罗斯',roam:true,zoom:1.1,center:[65,60],
+          itemStyle:{areaColor:'#1c2128',borderColor:'#30363d',borderWidth:1},
+          emphasis:{itemStyle:{areaColor:'#272c35'}},
+          label:{show:false},
+          layoutCenter:['50%','52%'],layoutSize:'92%'
         },
         series:[{
-          name:'城市热度',type:'effectScatter',coordinateSystem:'geo',
+          name:'城市热度',type:'scatter',coordinateSystem:'geo',
           data:cityData,
-          symbolSize:val=>Math.sqrt(val[2])*3,
-          rippleEffect:{brushType:'stroke'},
-          label:{formatter:'{b}',position:'right',show:false},
-          itemStyle:{color:'#58a6ff'}
+          symbolSize:val=>{
+            const v=val[2]||0;
+            // 平方根缩放，保证小值也可见：8 + sqrt(v)*4
+            return Math.max(10, 8 + Math.sqrt(v)*4);
+          },
+          label:{show:true,formatter:'{b}',position:'top',color:'#e6edf3',fontSize:11,textShadowBlur:3,textShadowColor:'#0d1117'},
+          itemStyle:{color:'#58a6ff',shadowBlur:12,shadowColor:'rgba(88,166,255,0.5)'},
+          emphasis:{label:{fontSize:13,color:'#79c0ff'}}
+        },{
+          name:'热度涟漪',type:'effectScatter',coordinateSystem:'geo',
+          data:cityData,
+          symbolSize:val=>Math.max(10, 8 + Math.sqrt(val[2]||0)*4),
+          rippleEffect:{brushType:'stroke',scale:3.2,period:4},
+          showEffectOn:'render',
+          label:{show:false},
+          itemStyle:{color:'rgba(88,166,255,0.55)'},
+          zlevel:1
         }]
       });
     } else {
@@ -362,19 +372,24 @@ function initTimeline(){
   // Heatmap
   const heatData=D.daily_heatmap||[];
   if(heatData.length>0){
-    const maxH=Math.max(1,...heatData.map(d=>d[1]));
+    const values=heatData.map(d=>d[1]);
+    const maxH=Math.max(1,...values);
+    // 颜色分级：0 值淡底，数值越大越亮
     const calRange=(D.kpi&&D.kpi.date_range_start&&D.kpi.date_range_end)
       ? [D.kpi.date_range_start,D.kpi.date_range_end]
-      : (heatData.length>0?[heatData[0][0].slice(0,7),heatData[heatData.length-1][0].slice(0,7)]:['2025-03','2026-05']);
-    initChart('tlHeatmap').setOption({...baseOpt(),tooltip:{formatter:p=>`${p.value[0]}<br>评论数: ${p.value[1]}`},
+      : (heatData.length>0?[heatData[0][0].slice(0,7),heatData[heatData.length-1][0].slice(0,7)]:['2025-03','2026-07']);
+    initChart('tlHeatmap').setOption({...baseOpt(),tooltip:{formatter:p=>{
+        const v=p.value[1]||0; return `${p.value[0]}<br>评论数: ${v}`;
+      }},
       visualMap:{min:0,max:maxH,calculable:true,orient:'horizontal',left:'center',bottom:0,
-        inRange:{color:['rgba(22,27,34,0.1)','rgba(88,166,255,0.3)','rgba(247,120,186,0.7)',PAL[1]]},
-        textStyle:{color:'rgba(145,152,161,0.4)',fontSize:10}},
-      calendar:{range:calRange,top:30,left:50,right:30,cellSize:['auto',14],
-        yearLabel:{show:false},monthLabel:{color:'rgba(145,152,161,0.4)',fontSize:10},
-        dayLabel:{color:'rgba(145,152,161,0.3)',fontSize:9,firstDay:1},
-        splitLine:{lineStyle:{color:'rgba(145,152,161,0.06)'}},itemStyle:{borderColor:'rgba(13,17,23,0.6)',borderWidth:1}},
-      series:[{type:'heatmap',coordinateSystem:'calendar',data:heatData}]});
+        inRange:{color:['#21262d','#1f3a5f','#2f6fae','#58a6ff','#79c0ff']},
+        textStyle:{color:'#9198a1',fontSize:10}},
+      calendar:{range:calRange,top:30,left:60,right:20,cellSize:['auto',15],
+        yearLabel:{show:true,color:'#6e7681',fontSize:11},
+        monthLabel:{color:'#9198a1',fontSize:10,position:'start',nameMap:'zh-cn'},
+        dayLabel:{color:'#6e7681',fontSize:9,firstDay:1,nameMap:'zh-cn'},
+        splitLine:{lineStyle:{color:'rgba(13,17,23,0.8)',width:2}},itemStyle:{borderColor:'rgba(13,17,23,0.8)',borderWidth:2,color:'#21262d'}},
+      series:[{type:'heatmap',coordinateSystem:'calendar',data:heatData.map(d=>[d[0],d[1]])}]});
   }
 
   // Trend with dataZoom
