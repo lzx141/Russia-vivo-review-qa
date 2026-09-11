@@ -128,7 +128,9 @@ jobs:
           start = pd.Timestamp('${{ env.start }}')
           end = pd.Timestamp('${{ env.end }}') + pd.Timedelta(days=1) - pd.Timedelta(microseconds=1)
           df = pd.read_csv('merged_data_translated.csv', encoding='utf-8', low_memory=False)
-          dates = pd.to_datetime(df['publishDate'], errors='coerce')
+          # 历史数据是 YYYY-MM-DD，新爬数据是 YYYY-MM-DD HH:MM；
+          # pandas 2 需要显式 mixed，否则后者会全部变成 NaT。
+          dates = pd.to_datetime(df['publishDate'], errors='coerce', format='mixed')
           count = int(dates.between(start, end).sum())
           latest = dates.max()
           print(f'Target range: {start.date()} through {end.date()}')
@@ -179,7 +181,7 @@ jobs:
           echo "======================================="
 
       - name: Report incomplete OZON source
-        if: steps.ozon.outcome == 'failure'
+        if: always() && steps.ozon.outcome == 'failure'
         run: |
           echo "OZON 数据未完成：托管 runner 的网络出口被 OZON 拦截。"
           echo "Wildberries 数据已在前面的步骤完成合并和提交。"
@@ -190,6 +192,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: selenium-diagnostics-${{ github.run_id }}
-          path: artifacts/
+          path: |
+            artifacts/
+            wildberries_reviews.xlsx
+            wildberries_qa.xlsx
           if-no-files-found: ignore
           retention-days: 7
