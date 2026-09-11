@@ -738,6 +738,9 @@ def crawl_from_excel(excel_path: str, start_date: str = None, end_date: str = No
     
     print(f"📝 从 '{excel_path}' 读取到 {len(df)} 个链接")
     print(f"🔍 筛选出 {len(ozon_df)} 个OZON链接")
+
+    failures = []
+    total_records = 0
     
     for idx, row in ozon_df.iterrows():
         url = row.get('网址', '')
@@ -761,15 +764,29 @@ def crawl_from_excel(excel_path: str, start_date: str = None, end_date: str = No
         try:
             reviews = crawl_ozon_reviews_by_url(url, model_name, start_date, end_date)
             if reviews:
+                total_records += len(reviews)
                 save_data_to_file(reviews, 'ozon_reviews.xlsx', 'reviews')
 
             questions = crawl_ozon_qa_by_url(url, model_name, start_date, end_date)
             if questions:
+                total_records += len(questions)
                 save_data_to_file(questions, 'ozon_questions.xlsx', 'questions')
 
         except Exception as e:
             print(f"❌ 处理链接时出错: {e}")
+            failures.append(f"{model_name}: {e}")
             continue
+
+    if len(ozon_df) > 0 and len(failures) == len(ozon_df):
+        details = "; ".join(failures[:3])
+        raise RuntimeError(
+            f"all {len(ozon_df)} OZON products failed; first errors: {details}"
+        )
+
+    if len(ozon_df) > 0 and total_records == 0:
+        raise RuntimeError(
+            f"OZON crawler produced 0 records for {start_date} through {end_date}"
+        )
     
     print("\n--- 任务完成 ---")
 

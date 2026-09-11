@@ -19,7 +19,9 @@ on:
 jobs:
   crawl:
     name: Crawl & Process Data
-    runs-on: ubuntu-latest
+    # 固定镜像，避免 ubuntu-latest 切换导致浏览器环境漂移。
+    # 浏览器保持有头模式，由 Xvfb 提供虚拟显示器。
+    runs-on: ubuntu-24.04
     timeout-minutes: 300
     permissions:
       contents: write
@@ -40,17 +42,29 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Install Chromium (for OZON Selenium crawler)
+      - name: Verify headed browser runtime
         run: |
-          sudo apt-get update
-          # 尝试多种安装方式，确保 chromium 可用
-          sudo apt-get install -y chromium-browser chromium-driver 2>/dev/null || \
-          sudo apt-get install -y chromium chromium-driver 2>/dev/null || \
-          sudo apt-get install -y chromium-browser 2>/dev/null || true
-          # 安装 selenium 所需 driver 管理
-          pip install selenium
-          echo "--- check ---"
-          which chromium chromium-browser chromedriver 2>/dev/null || echo "chromium check done"
+          set -euxo pipefail
+          google-chrome --version
+          chromedriver --version
+          command -v xvfb-run
+
+      - name: Smoke test headed Selenium through Xvfb
+        run: |
+          set -euxo pipefail
+          mkdir -p artifacts
+          xvfb-run -a -s "-screen 0 1920x1080x24 -ac +extension RANDR" python -c "
+          from src.crawler.ozon_crawler import _create_driver
+
+          driver = _create_driver(headless=False)
+          try:
+              driver.get('https://example.com/')
+              assert 'Example Domain' in driver.title, driver.title
+              driver.save_screenshot('artifacts/selenium-smoke.png')
+              print('Headed Selenium smoke test passed')
+          finally:
+              driver.quit()
+          "
 
       - name: Determine date range
         id: dates
@@ -72,21 +86,23 @@ jobs:
 
       - name: Run Wildberries crawler
         run: |
+          set -euxo pipefail
           python -c "
           import sys, os
           sys.path.insert(0, '.')
           from src.crawler.wildberries_crawler import crawl_from_excel
           crawl_from_excel('Rusisa_new_20260130_all.xlsx', start_date='${{ env.start }}', end_date='${{ env.end }}')
-          " || echo "WB crawl had issues, continuing"
+          "
 
-      - name: Run OZON crawler (with sort by time)
+      - name: Run headed OZON crawler through Xvfb
         run: |
-          python -c "
+          set -euxo pipefail
+          xvfb-run -a -s "-screen 0 1920x1080x24 -ac +extension RANDR" python -c "
           import sys
           sys.path.insert(0, '.')
           from src.crawler.ozon_crawler import crawl_from_excel
           crawl_from_excel('Rusisa_new_20260130_all.xlsx', start_date='${{ env.start }}', end_date='${{ env.end }}')
-          " || echo "OZON crawl had issues, continuing"
+          "
 
       - name: Incremental translation (DeepSeek)
         env:
@@ -98,6 +114,25 @@ jobs:
           else
             echo "⚠️ No DEEPSEEK_API_KEY secret configured, skipping translation"
           fi
+
+      - name: Require target-month data before commit
+        run: |
+          set -euxo pipefail
+          python -c "
+          import pandas as pd
+
+          start = pd.Timestamp('${{ env.start }}')
+          end = pd.Timestamp('${{ env.end }}') + pd.Timedelta(days=1) - pd.Timedelta(microseconds=1)
+          df = pd.read_csv('merged_data_translated.csv', encoding='utf-8', low_memory=False)
+          dates = pd.to_datetime(df['publishDate'], errors='coerce')
+          count = int(dates.between(start, end).sum())
+          latest = dates.max()
+          print(f'Target range: {start.date()} through {end.date()}')
+          print(f'Target-month records: {count}')
+          print(f'Latest publishDate: {latest}')
+          if count == 0:
+              raise SystemExit('Freshness gate failed: target month has 0 records')
+          "
 
       - name: Load data into local SQLite (validation)
         run: |
@@ -136,3 +171,12 @@ jobs:
           echo "日期范围: ${{ env.start }} ~ ${{ env.end }}"
           echo "Workflow 由调度（每月3日）或手动触发"
           echo "======================================="
+
+      - name: Upload Selenium diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: selenium-diagnostics-${{ github.run_id }}
+          path: artifacts/
+          if-no-files-found: ignore
+          retention-days: 7
