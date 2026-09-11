@@ -50,16 +50,18 @@ jobs:
           command -v xvfb-run
 
       - name: Smoke test headed Selenium through Xvfb
+        timeout-minutes: 2
         run: |
           set -euxo pipefail
           mkdir -p artifacts
-          xvfb-run -a -s "-screen 0 1920x1080x24 -ac +extension RANDR" python -c "
+          timeout 90s xvfb-run -a -s "-screen 0 1920x1080x24 -ac +extension RANDR" python -c "
           from src.crawler.ozon_crawler import _create_driver
 
           driver = _create_driver(headless=False)
           try:
-              driver.get('https://example.com/')
-              assert 'Example Domain' in driver.title, driver.title
+              driver.set_page_load_timeout(15)
+              driver.get('data:text/html,<title>Selenium Smoke</title><h1>ok</h1>')
+              assert driver.title == 'Selenium Smoke', driver.title
               driver.save_screenshot('artifacts/selenium-smoke.png')
               print('Headed Selenium smoke test passed')
           finally:
