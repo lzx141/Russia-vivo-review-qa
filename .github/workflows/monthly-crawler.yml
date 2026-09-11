@@ -97,6 +97,8 @@ jobs:
           "
 
       - name: Run headed OZON crawler through Xvfb
+        id: ozon
+        continue-on-error: true
         run: |
           set -euxo pipefail
           xvfb-run -a -s "-screen 0 1920x1080x24 -ac +extension RANDR" python -c "
@@ -149,8 +151,8 @@ jobs:
         run: |
           git config user.name "GitHub Actions Bot"
           git config user.email "actions@github.com"
-          git add -A
-          # 仅提交有变化的文件（原始数据/、翻译CSV）
+          # 运行时 Excel 和诊断截图不入库，只提交可部署的合并数据。
+          git add -f merged_data_translated.csv
           if ! git diff --cached --quiet; then
             git commit -m "data: 月度数据自动更新 $(date +%Y%m%d)"
             # 先拉取远程最新代码（rebase），避免非快进更新冲突
@@ -168,11 +170,20 @@ jobs:
           fi
 
       - name: Summary
+        if: always()
         run: |
           echo "============ 月度爬取完成 ============"
           echo "日期范围: ${{ env.start }} ~ ${{ env.end }}"
+          echo "OZON 步骤结果: ${{ steps.ozon.outcome }}"
           echo "Workflow 由调度（每月3日）或手动触发"
           echo "======================================="
+
+      - name: Report incomplete OZON source
+        if: steps.ozon.outcome == 'failure'
+        run: |
+          echo "OZON 数据未完成：托管 runner 的网络出口被 OZON 拦截。"
+          echo "Wildberries 数据已在前面的步骤完成合并和提交。"
+          exit 1
 
       - name: Upload Selenium diagnostics on failure
         if: failure()

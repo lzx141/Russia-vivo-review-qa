@@ -179,6 +179,15 @@ CSV_COLUMNS = [
     "question_zh", "question_en", "answer_zh", "answer_en", "review_zh", "review_en",
 ]
 
+# 月度爬虫在 CI 工作区根目录生成这些临时文件。它们不提交到 Git，
+# 但必须在本次运行中参与增量合并，否则抓到的数据会在 runner 销毁时丢失。
+RUNTIME_CRAWLER_PATHS = {
+    "ozon_reviews": ["ozon_reviews.xlsx"],
+    "ozon_questions": ["ozon_questions.xlsx"],
+    "wildberries_reviews": ["wildberries_reviews.xlsx"],
+    "wildberries_questions": ["wildberries_qa.xlsx"],
+}
+
 
 def _cell_text(val) -> str:
     """Excel 单元格 → 字符串（去掉 .0 尾缀等）"""
@@ -237,7 +246,14 @@ def extract_all_raw() -> list[dict]:
     records: list[dict] = []
     seen_keys: set = set()
 
-    for group, paths in DATA_PATHS.items():
+    all_paths = {group: list(paths) for group, paths in DATA_PATHS.items()}
+    for group, runtime_paths in RUNTIME_CRAWLER_PATHS.items():
+        group_paths = all_paths.setdefault(group, [])
+        for rel_path in runtime_paths:
+            if rel_path not in group_paths:
+                group_paths.append(rel_path)
+
+    for group, paths in all_paths.items():
         data_type = "review" if "review" in group else "qa"
         for rel_path in paths:
             full_path = os.path.join(PROJECT_ROOT, rel_path)

@@ -167,6 +167,33 @@ def _click_product_card_to_detail(driver, model_name: str, wait: WebDriverWait) 
 
 def _ensure_detail_page(driver, model_name: str, wait: WebDriverWait) -> None:
     """确保停留在商品详情页（若被重定向到搜索页则自动进入）"""
+    try:
+        body_text = driver.find_element(By.TAG_NAME, "body").text
+    except Exception:
+        body_text = ""
+
+    access_markers = (
+        "Похоже, нет соединения",
+        "Попробуйте отключить VPN",
+        "Доступ ограничен",
+        "Access denied",
+    )
+    matched_marker = next(
+        (marker for marker in access_markers if marker.lower() in body_text.lower()),
+        None,
+    )
+    if matched_marker:
+        os.makedirs("artifacts", exist_ok=True)
+        try:
+            driver.save_screenshot("artifacts/ozon-access-blocked.png")
+        except Exception:
+            pass
+        current_url = getattr(driver, "current_url", "")
+        title = getattr(driver, "title", "")
+        raise RuntimeError(
+            f"OZON access blocked: {matched_marker}; title={title!r}; url={current_url}"
+        )
+
     if _is_search_redirect_page(driver):
         print("🔍 检测到 OZON 搜索/推荐页（原商品售罄），正在自动进入商品详情页...")
         _click_product_card_to_detail(driver, model_name, wait)
@@ -196,7 +223,11 @@ def crawl_ozon_reviews_by_url(product_url: str, model_name: str = "Unknown Model
     time.sleep(random.uniform(5, 8))
 
     # 若被重定向到搜索页（商品售罄），自动点击进入商品详情页
-    _ensure_detail_page(driver, model_name, wait)
+    try:
+        _ensure_detail_page(driver, model_name, wait)
+    except Exception:
+        driver.quit()
+        raise
 
     print("正在滚动到评论区域...")
     try:
@@ -408,7 +439,11 @@ def crawl_ozon_qa_by_url(product_url: str, model_name: str = "Unknown Model",
     time.sleep(random.uniform(5, 8))
 
     # 若被重定向到搜索页（商品售罄），自动点击进入商品详情页
-    _ensure_detail_page(driver, model_name, wait)
+    try:
+        _ensure_detail_page(driver, model_name, wait)
+    except Exception:
+        driver.quit()
+        raise
 
     print("正在滚动到评论区域...")
     try:
@@ -774,6 +809,8 @@ def crawl_from_excel(excel_path: str, start_date: str = None, end_date: str = No
 
         except Exception as e:
             print(f"❌ 处理链接时出错: {e}")
+            if "OZON access blocked" in str(e):
+                raise
             failures.append(f"{model_name}: {e}")
             continue
 
