@@ -447,7 +447,9 @@ def merge_and_save(records: list):
             df[col] = None
     df = df[CSV_COLUMNS]
     # rate 保持字符串；publishDate 统一格式
-    df.to_csv(MERGED_TRANSLATED_CSV, index=False, encoding="utf-8")
+    # lineterminator 固定为 \n：否则 Windows 本地跑出来的字段内换行会变成 \r\n，
+    # 与 Linux CI 生成的历史数据不一致，产生整表 diff。
+    df.to_csv(MERGED_TRANSLATED_CSV, index=False, encoding="utf-8", lineterminator="\n")
     logger.info("CSV 已保存: %s（共 %d 条）", MERGED_TRANSLATED_CSV, len(df))
 
     try:

@@ -3,8 +3,6 @@ from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options as ChromeOptions
-from selenium.webdriver.edge.options import Options as EdgeOptions
-from selenium.webdriver.edge.service import Service as EdgeService
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import time
@@ -14,14 +12,26 @@ import os
 import dateparser
 
 
+def clear_proxy_environment():
+    """
+    移除进程内的 HTTP(S)_PROXY 环境变量。
+
+    本机常驻 Clash 等代理软件并设置了 HTTP_PROXY/HTTPS_PROXY，这会导致：
+      1. Selenium 与 chromedriver 之间的本地 HTTP 通信被代理转发（错误 Bad Gateway）；
+      2. 浏览器走代理出口，OZON 识别为 VPN 并返回 403「Похоже, нет соединения」拦截页。
+    OZON 对国内直连的真实浏览器是放行的，因此爬虫必须直连、绕过代理环境变量。
+    """
+    for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
+                 "http_proxy", "https_proxy", "all_proxy"):
+        os.environ.pop(name, None)
+
+
 def _create_driver(headless: bool = True):
     """
-    创建浏览器驱动（优先 Edge，Chrome 兜底）
-
-    本机未安装 Google Chrome 时使用系统自带 Microsoft Edge（Chromium 内核），
-    服务器 / GitHub Actions 环境则自动回退到 Chrome。
+    创建 Google Chrome 浏览器驱动。
     headless=True 时使用无头模式（更快，适合批量爬取）。
     """
+    clear_proxy_environment()
     common_args = [
         "--lang=ru-RU",
         "--disable-blink-features=AutomationControlled",
@@ -30,37 +40,14 @@ def _create_driver(headless: bool = True):
         "--disable-gpu",
         "--no-sandbox",
         "--disable-dev-shm-usage",
+        # 强制直连：忽略系统代理与 HTTP_PROXY 环境变量
+        "--no-proxy-server",
         "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.6478.127 Safari/537.36",
     ]
     if headless:
         common_args.append("--headless=new")
 
-    # 优先尝试 Edge（本机有）
-    try:
-        edge_path = None
-        for p in [
-            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-            r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
-            "/usr/bin/microsoft-edge",
-            "/usr/bin/microsoft-edge-stable",
-        ]:
-            if os.path.exists(p):
-                edge_path = p
-                break
-        if edge_path:
-            edge_opts = EdgeOptions()
-            for arg in common_args:
-                edge_opts.add_argument(arg)
-            edge_opts.add_experimental_option("excludeSwitches", ["enable-automation"])
-            edge_opts.add_experimental_option("useAutomationExtension", False)
-            driver = webdriver.Edge(service=EdgeService(), options=edge_opts)
-            _inject_anti_detect(driver)
-            return driver
-    except Exception as e:
-        print(f"⚠️ Edge 驱动初始化失败，尝试 Chrome: {e}")
-
-    # 回退 Chrome
     chrome_opts = ChromeOptions()
     for arg in common_args:
         chrome_opts.add_argument(arg)
@@ -165,6 +152,75 @@ def _click_product_card_to_detail(driver, model_name: str, wait: WebDriverWait) 
         return False
 
 
+# 星级图标：OZON 的 class 名带构建哈希（如 a5d5_5_1-a9）会随前端发版失效，
+# 因此改为按「星形 path 的填充色」判定，亮星为品牌橙。
+_RATING_STAR_COLOR = "rgb(255, 168, 0)"
+_RATING_STAR_PATH = "M9.358 6.136"
+_RATING_JS = """
+const card = arguments[0];
+const orange = arguments[1];
+const prefix = arguments[2];
+let stars = 0;
+let filled = 0;
+for (const svg of card.querySelectorAll('svg')) {
+  const path = svg.querySelector('path');
+  if (!path) continue;
+  const d = path.getAttribute('d') || '';
+  if (!d.startsWith(prefix)) continue;
+  stars += 1;
+  if (getComputedStyle(path).fill === orange) filled += 1;
+}
+return [stars, filled];
+"""
+
+
+def _read_rating(driver, element) -> int:
+    """
+    读取单条评论的星级（1-5）。
+
+    新版详情页把星级渲染成 5 个 <svg> 星形，亮星填充品牌橙色；
+    XPath 的 `//svg` 在这些节点上匹配不到（需 local-name()），
+    所以改用 JS 读取计算样式。旧版结构则回退到 class 统计。
+    """
+    try:
+        stars, filled = driver.execute_script(
+            _RATING_JS, element, _RATING_STAR_COLOR, _RATING_STAR_PATH)
+    except Exception:
+        stars = filled = 0
+
+    if filled:
+        return max(1, min(5, int(filled)))
+    if stars:
+        # 页面只渲染已点亮的星时，星的个数即星级
+        return max(1, min(5, int(stars)))
+
+    # 旧版结构回退：按 hashed class 统计同 class 的 svg 个数
+    try:
+        legacy = element.find_elements(
+            By.XPATH, './/*[local-name()="svg"][contains(@class, "-a9")]')
+        if legacy:
+            first_class = legacy[0].get_attribute("class")
+            count = sum(1 for svg in legacy
+                        if svg.get_attribute("class") == first_class)
+            if count:
+                return max(1, min(5, count))
+    except Exception:
+        pass
+
+    # 默认没有零星，至少 1 星
+    return 1
+
+
+def _url_without_sort(url: str) -> str:
+    """去掉 URL 中的 sort 参数（OZON 商品页实际不按该参数排序，留着只影响渲染成功率）"""
+    base, sep, query = (url or "").partition("?")
+    if not sep:
+        return url
+    kept = [part for part in query.split("&")
+            if part and not part.lower().startswith("sort=")]
+    return base + ("?" + "&".join(kept) if kept else "")
+
+
 def _ensure_detail_page(driver, model_name: str, wait: WebDriverWait) -> None:
     """确保停留在商品详情页（若被重定向到搜索页则自动进入）"""
     try:
@@ -244,15 +300,44 @@ def crawl_ozon_reviews_by_url(product_url: str, model_name: str = "Unknown Model
     seen_uuids = set()
     print("正在智能滚动加载评论...")
     
+    all_review_containers = []
     try:
-        initial_container = wait.until(
+        initial_container = WebDriverWait(driver, 30).until(
             EC.presence_of_element_located((By.XPATH, '//*[@data-widget="webListReviews"]'))
         )
     except Exception as e:
         print(f"❌ 未找到评论容器: {e}")
-        all_review_containers = []
     else:
         all_review_containers = [initial_container]
+
+    # 评论组件偶发不渲染：去掉 sort 参数重开一次（该参数实际不生效，见下方注释）
+    if not all_review_containers:
+        fallback_url = _url_without_sort(driver.current_url or product_url)
+        if fallback_url != (driver.current_url or product_url):
+            print(f"↻ 去掉排序参数重试: {fallback_url}")
+            try:
+                driver.get(fallback_url)
+                time.sleep(random.uniform(5, 8))
+                _ensure_detail_page(driver, model_name, WebDriverWait(driver, 15))
+                try:
+                    section = WebDriverWait(driver, 30).until(
+                        EC.presence_of_element_located(
+                            (By.XPATH, '//span[contains(text(), "Отзывы о товаре")]'))
+                    )
+                    driver.execute_script(
+                        "arguments[0].scrollIntoView({block: 'center'});", section)
+                    time.sleep(random.uniform(1, 2))
+                except Exception:
+                    pass
+                retry_container = WebDriverWait(driver, 30).until(
+                    EC.presence_of_element_located(
+                        (By.XPATH, '//*[@data-widget="webListReviews"]'))
+                )
+                all_review_containers = [retry_container]
+                print("✅ 重试后已找到评论容器")
+            except Exception as e:
+                print(f"❌ 重试仍未找到评论容器: {e}")
+                all_review_containers = []
     
     max_load_attempts = 200
     no_change_count = 0
@@ -341,21 +426,7 @@ def crawl_ozon_reviews_by_url(product_url: str, model_name: str = "Unknown Model
             author = el.find_element(By.XPATH, ".//div[1]/div[2]//span[1]").text.strip()
             date_text = el.find_element(By.XPATH, "./div[1]/div[2]/div[1]").text.strip()
             
-            rating_svg = el.find_elements(
-                By.XPATH,
-                './/svg[contains(@class, "a5d5_4_0-a9")]',
-            )
-            rating = 0
-            if rating_svg:
-                first_class = rating_svg[0].get_attribute('class')
-                if first_class:
-                    for svg in rating_svg:
-                        svg_class = svg.get_attribute('class')
-                        if svg_class == first_class:
-                            rating += 1
-            # 默认没有零星，至少1星
-            if rating == 0:
-                rating = 1
+            rating = _read_rating(driver, el)
             
             comment_text = ""
             try:
@@ -416,10 +487,13 @@ def crawl_ozon_reviews_by_url(product_url: str, model_name: str = "Unknown Model
     
     return reviews
 
-def crawl_ozon_qa_by_url(product_url: str, model_name: str = "Unknown Model",
-                         start_date: str = None, end_date: str = None):
+def _crawl_ozon_qa_legacy(product_url: str, model_name: str = "Unknown Model",
+                          start_date: str = None, end_date: str = None):
     """
-    爬取Ozon商品问答
+    爬取 Ozon 商品问答（旧版页面结构：data-question-id / data-answer-id）
+
+    OZON 在 2026-09 前后把问答组件换成了 webPDPListQuestions
+    （data-question-uuid / data-answer-uuid），本函数仅作为旧结构回退保留。
     Args:
         product_url: 商品页面URL
         model_name: 商品名称
@@ -660,6 +734,227 @@ def crawl_ozon_qa_by_url(product_url: str, model_name: str = "Unknown Model",
 
     return filtered_qa
 
+
+# ══════════════════════════════════════════════════════════════════
+# 问答爬虫（新版页面结构，2026-09 起 OZON 使用的 webPDPListQuestions）
+# ══════════════════════════════════════════════════════════════════
+
+# 单条问答内的相对路径（已在 OZON 实际页面上逐条核对）
+_QA_QUESTION_TEXT = (
+    "./div[1]/div[2]/div[2]/div[1]",
+    "./div[1]/div[2]/div[2]/div[1]/span[1]",
+)
+_QA_QUESTION_AUTHOR = (
+    "./div[1]/div[2]/div[2]/div[2]",
+    "./div[1]/div[2]/div[2]/div[2]//span[1]",
+)
+_QA_QUESTION_DATE = (
+    "./div[1]/div[2]/div[1]/div[1]",
+    "./div[1]/div[2]/div[1]/div[1]//span[1]",
+)
+_QA_PRODUCT_LINK = (
+    "./div[1]/div[2]/div[1]/a",
+)
+_QA_ANSWER_TEXT = (
+    ".//div[@data-answer-uuid]/div[1]/div[3]/div[1]",
+    ".//div[@data-answer-uuid]//div[@data-answer-uuid]/div[1]/div[3]/div[1]",
+)
+_QA_ANSWER_AUTHOR = (
+    ".//div[@data-answer-uuid]/div[1]/div[2]/div[1]",
+)
+_QA_ANSWER_DATE = (
+    ".//div[@data-answer-uuid]/div[1]/div[2]/div[2]",
+)
+
+
+def _qa_text(element, xpaths) -> str:
+    """按候选 XPath 依次取第一段非空文本"""
+    for xpath in xpaths:
+        try:
+            candidates = element.find_elements(By.XPATH, xpath)
+        except Exception:
+            continue
+        for candidate in candidates:
+            text = " ".join((candidate.text or "").split())
+            if text:
+                return text
+    return ""
+
+
+def _parse_qa_item(item) -> dict | None:
+    """解析一条问答卡片（新版结构），问题为空视为无效卡片"""
+    question = _qa_text(item, _QA_QUESTION_TEXT)
+    if not question:
+        return None
+    return {
+        "author": _qa_text(item, _QA_QUESTION_AUTHOR) or "Аноним",
+        "publishDate": _qa_text(item, _QA_QUESTION_DATE),
+        "SKU": _qa_text(item, _QA_PRODUCT_LINK),
+        "question": question,
+        "content": _qa_text(item, _QA_ANSWER_TEXT),
+        # 回答者与回答时间目前未入库，保留原始文本便于排查
+        "answer_author": _qa_text(item, _QA_ANSWER_AUTHOR),
+        "answer_date": _qa_text(item, _QA_ANSWER_DATE),
+    }
+
+
+def _collect_qa_items(driver, max_rounds: int = 12) -> list:
+    """滚动加载问答列表并去重解析（新版：div[@data-question-uuid]）"""
+    seen: set = set()
+    pairs: list = []
+
+    def collect() -> int:
+        found = 0
+        try:
+            items = driver.find_elements(By.XPATH, "//div[@data-question-uuid]")
+        except Exception:
+            return 0
+        for item in items:
+            try:
+                qid = item.get_attribute("data-question-uuid")
+            except Exception:
+                continue
+            found += 1
+            if not qid or qid in seen:
+                continue
+            parsed = _parse_qa_item(item)
+            if not parsed:
+                continue
+            seen.add(qid)
+            pairs.append(parsed)
+        return found
+
+    collect()
+    stable = 0
+    for _ in range(max_rounds):
+        try:
+            widget = driver.find_element(
+                By.XPATH, '//*[@data-widget="webPDPListQuestions"]')
+            driver.execute_script(
+                "arguments[0].scrollIntoView({block: 'end'});", widget)
+        except Exception:
+            pass
+        driver.execute_script("window.scrollBy(0, 1400)")
+        time.sleep(random.uniform(2, 3))
+        before = len(pairs)
+        collect()
+        stable = stable + 1 if len(pairs) == before else 0
+        print(f"🔄 问答加载：已解析 {len(pairs)} 条（连续无新增 {stable} 次）")
+        if stable >= 2:
+            break
+    return pairs
+
+
+def crawl_ozon_qa_by_url(product_url: str, model_name: str = "Unknown Model",
+                         start_date: str = None, end_date: str = None):
+    """
+    爬取Ozon商品问答
+    Args:
+        product_url: 商品页面URL
+        model_name: 商品名称
+        start_date: 开始日期 (格式: 'YYYY-MM-DD' 或 'YYYY-MM-DD HH:MM')
+        end_date: 结束日期 (格式: 'YYYY-MM-DD' 或 'YYYY-MM-DD HH:MM')
+    Returns:
+        问答列表
+    """
+    if not product_url:
+        return []
+
+    driver = _create_driver(headless=False)
+    wait = WebDriverWait(driver, 15)
+
+    print(f"正在打开商品页面: {product_url}")
+    driver.get(product_url)
+    time.sleep(random.uniform(5, 8))
+
+    try:
+        _ensure_detail_page(driver, model_name, wait)
+
+        print("正在滚动到评论区域...")
+        try:
+            reviews_section = wait.until(
+                EC.presence_of_element_located(
+                    (By.XPATH, '//span[contains(text(), "Отзывы о товаре")]'))
+            )
+            driver.execute_script(
+                "arguments[0].scrollIntoView({block: 'center'});", reviews_section)
+            time.sleep(random.uniform(1, 2))
+            print("✅ 已滚动到评论区域")
+        except Exception as e:
+            print(f"⚠️ 未找到评论区域: {e}")
+
+        print("正在切换到'Вопросы о товаре'标签...")
+        clicked = False
+        for attempt in range(3):
+            try:
+                qa_button = wait.until(
+                    EC.element_to_be_clickable(
+                        (By.XPATH,
+                         '//button[.//span[contains(text(), "Вопросы")]]'))
+                )
+                driver.execute_script("arguments[0].click();", qa_button)
+                clicked = True
+                break
+            except Exception as e:
+                print(f"⚠️ 无法点击'Вопросы'按钮（第 {attempt + 1} 次）: {e}")
+                time.sleep(2)
+        if clicked:
+            print("✅ 已点击'Вопросы'按钮")
+        time.sleep(random.uniform(3, 4))
+
+        try:
+            WebDriverWait(driver, 20).until(
+                EC.presence_of_element_located(
+                    (By.XPATH, '//div[@data-question-uuid]'))
+            )
+        except Exception:
+            print("⚠️ 未加载到新版问答列表")
+            driver.quit()
+            print("↩️ 回退到旧版问答解析")
+            return _crawl_ozon_qa_legacy(
+                product_url, model_name, start_date, end_date)
+
+        qa_pairs = _collect_qa_items(driver)
+    except Exception:
+        driver.quit()
+        raise
+
+    print(f"🎯 共抓取 {len(qa_pairs)} 条问答")
+
+    start_datetime = pd.to_datetime(start_date) if start_date else None
+    end_datetime = pd.to_datetime(end_date) if end_date else None
+
+    filtered_qa = []
+    skipped_count = 0
+    for q in qa_pairs:
+        q_datetime = None
+        if q.get("publishDate"):
+            try:
+                q_datetime = dateparser.parse(q["publishDate"], languages=["ru"])
+            except Exception:
+                q_datetime = None
+        if not q_datetime:
+            skipped_count += 1
+            continue
+        if start_datetime and q_datetime < start_datetime:
+            skipped_count += 1
+            continue
+        if end_datetime and q_datetime > end_datetime:
+            skipped_count += 1
+            continue
+        q["publishDate"] = q_datetime.strftime("%Y-%m-%d %H:%M")
+        q["name"] = model_name
+        q["URL"] = product_url
+        q["siteName"] = "OZON-question"
+        filtered_qa.append(q)
+
+    print(f"📊 统计: 跳过 {skipped_count} 条，保留 {len(filtered_qa)} 条")
+
+    driver.quit()
+
+    return filtered_qa
+
+
 def save_data_to_file(data, file_path, data_type):
     """
     将数据保存到指定文件，如果文件存在则追加
@@ -744,19 +1039,25 @@ def _default_last_month() -> tuple[str, str]:
     return last_month_start.strftime('%Y-%m-%d'), last_month_end.strftime('%Y-%m-%d')
 
 
-def crawl_from_excel(excel_path: str, start_date: str = None, end_date: str = None):
+def crawl_from_excel(excel_path: str, start_date: str = None, end_date: str = None,
+                     only: str = "all"):
     """
     从Excel文件读取链接并爬取Ozon评论
     Args:
         excel_path: Excel文件路径
         start_date: 开始日期 (格式: 'YYYY-MM-DD')，默认自动取上月
         end_date: 结束日期 (格式: 'YYYY-MM-DD')，默认自动取上月
+        only: 'all' 同时抓评论与问答；'reviews' / 'qa' 只抓其中一类
     """
+    if only not in ("all", "reviews", "qa"):
+        raise ValueError(f"only 只能是 all / reviews / qa，收到: {only!r}")
     if start_date is None or end_date is None:
         auto_start, auto_end = _default_last_month()
         start_date = start_date or auto_start
         end_date = end_date or auto_end
         print(f"📅 动态日期范围: {start_date} ~ {end_date}")
+
+    clear_proxy_environment()
 
     if not os.path.exists(excel_path):
         print(f"❌ Excel文件不存在: {excel_path}")
@@ -777,35 +1078,38 @@ def crawl_from_excel(excel_path: str, start_date: str = None, end_date: str = No
     failures = []
     total_records = 0
     
-    for idx, row in ozon_df.iterrows():
+    for ordinal, (idx, row) in enumerate(ozon_df.iterrows(), 1):
         url = row.get('网址', '')
         model_name = row.get('机型', 'Unknown Model')
 
         if not url:
             continue
 
-        # OZON 评论区排序：追加 sort=published_at_desc，按发布时间倒序展示
-        # 这样无需手动点击"Сортировать"下拉框，即可让评论按时间顺序加载
+        # OZON 评论区排序：追加 sort=published_at_desc。
+        # 实测该参数已不生效（返回顺序并非按时间倒序），且偶发导致评论组件不渲染；
+        # 因此仅作为默认 URL 保留，渲染失败时由 crawl_ozon_reviews_by_url 去掉后重试。
         sep = '&' if '?' in url else '?'
         url = url.split('#')[0] + sep + 'sort=published_at_desc'
         print(f"🔀 已启用按时间排序: {url}")
 
         print(f"\n{'='*60}")
-        print(f"处理第 {idx + 1}/{len(ozon_df)} 个链接")
+        print(f"处理第 {ordinal}/{len(ozon_df)} 个链接")
         print(f"商品名称: {model_name}")
         print(f"URL: {url}")
         print(f"{'='*60}\n")
         
         try:
-            reviews = crawl_ozon_reviews_by_url(url, model_name, start_date, end_date)
-            if reviews:
-                total_records += len(reviews)
-                save_data_to_file(reviews, 'ozon_reviews.xlsx', 'reviews')
+            if only in ("all", "reviews"):
+                reviews = crawl_ozon_reviews_by_url(url, model_name, start_date, end_date)
+                if reviews:
+                    total_records += len(reviews)
+                    save_data_to_file(reviews, 'ozon_reviews.xlsx', 'reviews')
 
-            questions = crawl_ozon_qa_by_url(url, model_name, start_date, end_date)
-            if questions:
-                total_records += len(questions)
-                save_data_to_file(questions, 'ozon_questions.xlsx', 'questions')
+            if only in ("all", "qa"):
+                questions = crawl_ozon_qa_by_url(url, model_name, start_date, end_date)
+                if questions:
+                    total_records += len(questions)
+                    save_data_to_file(questions, 'ozon_questions.xlsx', 'questions')
 
         except Exception as e:
             print(f"❌ 处理链接时出错: {e}")
@@ -827,7 +1131,66 @@ def crawl_from_excel(excel_path: str, start_date: str = None, end_date: str = No
     
     print("\n--- 任务完成 ---")
 
+def main(argv=None):
+    """本地命令行入口；试运行只检查输入，不启动浏览器。"""
+    import argparse
+    import sys
+
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    if project_root not in sys.path:
+        sys.path.insert(0, project_root)
+    from config.config import PRODUCT_URLS_EXCEL
+
+    parser = argparse.ArgumentParser(description="Ozon 上月评论与问答采集")
+    parser.add_argument('--excel', default=PRODUCT_URLS_EXCEL, help="商品链接 Excel 路径")
+    parser.add_argument('--start-date', help="开始日期，例如 2026-08-01")
+    parser.add_argument('--end-date', help="结束日期，例如 2026-08-31")
+    parser.add_argument('--dry-run', action='store_true', help="仅检查路径、日期和商品链接")
+    parser.add_argument('--only', choices=('all', 'reviews', 'qa'), default='all',
+                        help="只抓评论或只抓问答（默认两者都抓）")
+    args = parser.parse_args(argv)
+    clear_proxy_environment()
+    auto_start, auto_end = _default_last_month()
+    start, end = args.start_date or auto_start, args.end_date or auto_end
+    try:
+        start_ts, end_ts = pd.Timestamp(start), pd.Timestamp(end)
+        if pd.isna(start_ts) or pd.isna(end_ts) or start_ts > end_ts:
+            raise ValueError('开始日期必须早于或等于结束日期')
+    except (ValueError, TypeError) as exc:
+        parser.error(f'日期范围无效: {exc}')
+    excel_path = os.path.abspath(args.excel)
+    print(f'商品链接: {excel_path}')
+    print(f'日期范围: {start} ~ {end}')
+    if not os.path.isfile(excel_path):
+        print(f'错误: 商品链接 Excel 不存在: {excel_path}')
+        return 1
+    try:
+        frame = pd.read_excel(excel_path, engine='openpyxl')
+        if not {'名称', '网址'}.issubset(frame.columns):
+            raise ValueError("Excel 必须包含 '名称' 和 '网址' 列")
+        links = frame[frame['名称'].astype(str).str.contains('OZON', case=False, na=False)
+                      & frame['网址'].notna()]
+        if links.empty:
+            raise ValueError('Excel 中没有可用的 Ozon 商品链接')
+        print(f'Ozon 商品链接数: {len(links)}')
+        if args.dry_run:
+            print('检查通过；未启动浏览器、未修改数据。')
+            return 0
+        previous_dir = os.getcwd()
+        try:
+            os.chdir(project_root)
+            crawl_from_excel(excel_path, start, end, only=args.only)
+        finally:
+            os.chdir(previous_dir)
+    except Exception as exc:
+        print(f'采集未完成: {type(exc).__name__}: {exc}')
+        return 1
+    return 0
+
+
 if __name__ == "__main__":
-    print("Ozon爬虫工具")
-    excel_path = r"c:\Users\lenovo\Desktop\益普索\rusisa\Rusisa_new_20260130_all.xlsx"
-    crawl_from_excel(excel_path)
+    import sys
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, 'reconfigure'):
+            stream.reconfigure(encoding='utf-8')
+    sys.exit(main())
