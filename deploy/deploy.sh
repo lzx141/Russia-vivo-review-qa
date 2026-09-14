@@ -42,13 +42,19 @@ if [ -f "requirements.txt" ]; then
     pip install -r requirements.txt -q 2>&1 | tail -1 || echo "   依赖更新完成（或有警告）"
 fi
 
-# ── Step 3: 刷新仪表盘数据 ──────────────────────────
+# ── Step 3: 翻译数据入库 + 刷新仪表盘数据 ────────────
 echo ""
 echo "📊 [3/4] 刷新仪表盘数据..."
 
 # 优先使用数据库，如果没有数据库则使用 CSV
 if python -c "from config.config import DB_CONFIG; assert DB_CONFIG['password']" 2>/dev/null; then
-    echo "   数据库已配置，从数据库生成..."
+    # generate_stats.py 是「数据库优先」，只 pull 代码而不导入 CSV，
+    # 页面会一直停在旧数据（曾出现线上停留在 85,874 条的情况）。
+    # init_database.py 按行数断点续传，重复执行安全；失败不阻断本次部署。
+    echo "   数据库已配置，先增量导入 merged_data_translated.csv..."
+    python src/etl/init_database.py --load-translated 2>&1 | tail -5 \
+        || echo "   ⚠️ 数据入库失败，继续使用数据库现有数据"
+    echo "   从数据库生成..."
     python src/dashboard/generate_stats.py 2>&1
 else
     echo "   数据库未配置，使用 CSV 数据..."

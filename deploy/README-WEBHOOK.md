@@ -18,6 +18,7 @@ webhook_server.py（Python 内置 HTTP 服务）
 deploy/deploy.sh
    ├── git pull origin main
    ├── pip install -r requirements.txt
+   ├── python src/etl/init_database.py --load-translated   # 增量入库（大屏优先读库）
    ├── python src/dashboard/generate_stats.py
    └── 重启服务（如有必要）
 ```
@@ -188,3 +189,4 @@ WEBHOOK_NOTIFY_URL=https://oapi.dingtalk.com/robot/send?access_token=xxxxx
 | GitHub 显示 401 错误 | Secret 不匹配 | 检查 .env 和 GitHub 设置是否一致 |
 | GitHub 显示 200 但代码未更新 | deploy.sh 无执行权限 | `chmod +x deploy/deploy.sh` |
 | 部署后仪表盘仍是旧数据 | generate_stats.py 失败 | 手动运行 `python src/dashboard/generate_stats.py` 查看报错 |
+| 部署成功但数据停在旧月份 | `generate_stats.py` 优先读数据库，而 `init_database.py --load-translated` 未执行（新提交的 CSV 没进库） | 手动运行 `python src/etl/init_database.py --load-translated` 后重新生成；deploy.sh 现已内置该步骤 |
