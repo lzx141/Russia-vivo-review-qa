@@ -33,6 +33,7 @@ DATA_PATHS = {
         "原始数据/ozon_reviews3.xlsx",
         "原始数据/ozon_reviews4.xlsx",
         "原始数据/ozon_reviews5.xlsx",
+        "原始数据/ozon_reviews6.xlsx",
     ],
     "ozon_questions": [
         "原始数据/ozon_questions.xlsx",
@@ -40,6 +41,7 @@ DATA_PATHS = {
         "原始数据/ozon_questions3.xlsx",
         "原始数据/ozon_questions4.xlsx",
         "原始数据/ozon_questions5.xlsx",
+        "原始数据/ozon_questions6.xlsx",
     ],
     "wildberries_reviews": [
         "原始数据/wildberries_reviews.xlsx",
