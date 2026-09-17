@@ -52,6 +52,7 @@ package-lock.json
 
 # 本地临时文件
 .playwright-mcp/
+.worktrees/
 *.bak
 .translate_deepseek.log
 .translate_deepseek2.log
