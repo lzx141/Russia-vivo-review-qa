@@ -1,0 +1,3 @@
+# Server runtime: keep aligned with the installed Spark distribution.
+pyspark==3.5.9
+PyYAML>=6.0,<7.0
