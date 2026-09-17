@@ -1,0 +1,4 @@
+data_type,source_file,author,publishDate,rate,question,answer,review,name,SKU,URL,siteName
+review,wildberries_reviews.xlsx,Анна,2026-01-10,5,,,Отличный телефон и батарея,vivo V50,,https://www.wildberries.ru/catalog/123456/detail.aspx,Wildberries
+review,wildberries_reviews.xlsx,Иван,2026-01-11,2,,,Быстро разряжается,vivo V50,,https://www.wildberries.ru/catalog/123456/detail.aspx,Wildberries
+
