@@ -1,0 +1,46 @@
+version: 1
+fields:
+  - record_id
+  - source_dataset
+  - source_record_id
+  - dataset_role
+  - platform
+  - record_type
+  - product_id
+  - source_product_id
+  - product_name
+  - brand
+  - category
+  - rating
+  - text
+  - answer
+  - author
+  - event_date
+  - ingested_at
+  - pipeline_run_id
+  - license
+  - source_file
+  - product_match_method
+  - product_match_confidence
+  - quality_score
+  - quality_issues
+  - duplicate_of
+  - is_rating_eligible
+  - is_trend_eligible
+  - is_text_eligible
+  - is_product_eligible
+required:
+  - record_id
+  - source_dataset
+  - dataset_role
+  - platform
+  - record_type
+  - product_id
+record_types:
+  - review
+  - question
+dataset_roles:
+  - business_primary
+  - external_validation
+  - benchmark
+
