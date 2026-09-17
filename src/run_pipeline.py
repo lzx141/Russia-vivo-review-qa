@@ -19,6 +19,7 @@ import os
 import sys
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -38,6 +39,31 @@ STAGES = [
     ("dashboard", "仪表盘数据生成"),
     ("quality", "数据质量检查"),
 ]
+
+
+def parse_trusted_inputs(values: list[str]) -> list:
+    """Parse ``PATH:ADAPTER`` values without breaking Windows drive letters."""
+    from src.data_platform.local_pipeline import InputSpec
+
+    specs = []
+    for value in values:
+        try:
+            path_value, adapter = value.rsplit(":", 1)
+        except ValueError as exc:
+            raise ValueError(f"Expected PATH:ADAPTER, got: {value}") from exc
+        if not path_value.strip() or not adapter.strip():
+            raise ValueError(f"Expected PATH:ADAPTER, got: {value}")
+        specs.append(InputSpec(Path(path_value), adapter.strip()))
+    return specs
+
+
+def run_trusted_pipeline(values: list[str], output_dir: Path, run_id: str | None = None):
+    """Run the auditable local reference pipeline for one or more sources."""
+    from src.data_platform.local_pipeline import run_local_pipeline
+
+    return run_local_pipeline(
+        parse_trusted_inputs(values), Path(output_dir), run_id=run_id
+    )
 
 
 def run_stage(stage_id: str) -> bool:
@@ -122,10 +148,31 @@ def main():
     parser.add_argument("--skip-dashboard", action="store_true", help="跳过仪表盘生成")
     parser.add_argument("--quality-only", action="store_true", help="仅运行数据质量检查")
     parser.add_argument("--stage", type=int, default=1, help="从第几个阶段开始 (1-5)")
+    parser.add_argument(
+        "--trusted-input",
+        action="append",
+        default=[],
+        metavar="PATH:ADAPTER",
+        help="运行带数据契约、质量评分和审计清单的新管道；可重复传入",
+    )
+    parser.add_argument(
+        "--trusted-output",
+        type=Path,
+        default=Path("output/platform"),
+        help="新管道输出根目录",
+    )
+    parser.add_argument("--run-id", help="可复现运行标识；不传则自动生成")
     args = parser.parse_args()
 
     run_id = datetime.now().strftime("run_%Y%m%d_%H%M%S")
     logger.info("🚀 管道启动 [%s]", run_id)
+
+    if args.trusted_input:
+        manifest = run_trusted_pipeline(
+            args.trusted_input, args.trusted_output, run_id=args.run_id or run_id
+        )
+        logger.info("可信数据管道完成: %s", manifest.to_dict())
+        return
 
     if args.quality_only:
         _run_quality_check()

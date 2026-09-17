@@ -18,6 +18,7 @@
 """
 
 from datetime import datetime, timedelta
+import os
 
 from airflow import DAG
 from airflow.operators.bash import BashOperator
@@ -53,7 +54,9 @@ dag = DAG(
 )
 
 # ── 任务定义 ──────────────────────────────────────────
-project_root = "/path/to/Russia-vivo-review-qa"
+project_root = os.environ.get("RUSSIA_DATA_PROJECT_ROOT")
+if not project_root:
+    raise RuntimeError("RUSSIA_DATA_PROJECT_ROOT must point to the checked-out project")
 python_cmd = f"cd {project_root} && python"
 
 

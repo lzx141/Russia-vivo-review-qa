@@ -32,6 +32,36 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _load_optional_json(path) -> dict | None:
+    if not path:
+        return None
+    target = os.fspath(path)
+    if not os.path.isfile(target):
+        return None
+    try:
+        with open(target, "r", encoding="utf-8") as stream:
+            value = json.load(stream)
+        return value if isinstance(value, dict) else None
+    except (OSError, json.JSONDecodeError):
+        logger.warning("治理数据无法读取: %s", target)
+        return None
+
+
+def load_governance_assets(manifest_path=None, comparison_path=None) -> dict:
+    """Load optional quality/run evidence without fabricating fallback metrics."""
+    manifest = _load_optional_json(
+        manifest_path or os.getenv("PLATFORM_MANIFEST_PATH")
+    )
+    comparison = _load_optional_json(
+        comparison_path or os.getenv("SOURCE_COMPARISON_PATH")
+    )
+    return {
+        "status": "available" if manifest or comparison else "unavailable",
+        "run_manifest": manifest,
+        "source_comparison": comparison,
+    }
+
+
 # ════════════════════════════════════════════════════════════
 # 数据源加载（DB 优先 → CSV 降级）
 # ════════════════════════════════════════════════════════════
@@ -939,6 +969,7 @@ def generate_all_data() -> dict:
         "source_dist": provider.get_source_dist(),
         "rating_length_scatter": provider.get_rating_length_scatter(),
         "product_monthly": provider.get_product_monthly(),
+        "governance": load_governance_assets(),
     }
 
     # 词云（TF-IDF 改进）
