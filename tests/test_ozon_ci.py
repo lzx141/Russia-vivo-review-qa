@@ -40,6 +40,10 @@ class TestOzonCrawlerCI(unittest.TestCase):
         if os.path.exists(self.excel_path):
             os.unlink(self.excel_path)
 
+    def test_safe_console_text_removes_unencodable_symbols(self):
+        result = ozon_crawler._safe_console_text("📝 已读取", encoding="gbk")
+        self.assertEqual(result, " 已读取")
+
     def test_ensure_detail_page_rejects_ozon_network_block_page(self):
         """Catch the false-positive 'detail page' result for OZON's block page."""
         with self.assertRaisesRegex(RuntimeError, "OZON access blocked"):

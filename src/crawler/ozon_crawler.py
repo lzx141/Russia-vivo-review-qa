@@ -12,6 +12,16 @@ import os
 import dateparser
 
 
+def _safe_console_text(value: str, encoding: str | None = None) -> str:
+    """Return text that the active console encoding can print safely."""
+    target = encoding or getattr(__import__("sys").stdout, "encoding", None) or "utf-8"
+    return value.encode(target, errors="ignore").decode(target)
+
+
+def _console_print(value: str = "") -> None:
+    print(_safe_console_text(value))
+
+
 def clear_proxy_environment():
     """
     移除进程内的 HTTP(S)_PROXY 环境变量。
@@ -1055,25 +1065,25 @@ def crawl_from_excel(excel_path: str, start_date: str = None, end_date: str = No
         auto_start, auto_end = _default_last_month()
         start_date = start_date or auto_start
         end_date = end_date or auto_end
-        print(f"📅 动态日期范围: {start_date} ~ {end_date}")
+        _console_print(f"📅 动态日期范围: {start_date} ~ {end_date}")
 
     clear_proxy_environment()
 
     if not os.path.exists(excel_path):
-        print(f"❌ Excel文件不存在: {excel_path}")
+        _console_print(f"❌ Excel文件不存在: {excel_path}")
         return
 
     df = pd.read_excel(excel_path, engine='openpyxl')
 
     if '网址' not in df.columns or '名称' not in df.columns:
-        print("❌ Excel文件中未找到'网址'或'名称'列")
+        _console_print("❌ Excel文件中未找到'网址'或'名称'列")
         return
     
     ozon_df = df[df['名称'].str.contains('OZON', case=False, na=False)]
     ozon_df = ozon_df[ozon_df['网址'].notna()]
     
-    print(f"📝 从 '{excel_path}' 读取到 {len(df)} 个链接")
-    print(f"🔍 筛选出 {len(ozon_df)} 个OZON链接")
+    _console_print(f"📝 从 '{excel_path}' 读取到 {len(df)} 个链接")
+    _console_print(f"🔍 筛选出 {len(ozon_df)} 个OZON链接")
 
     failures = []
     total_records = 0
@@ -1090,7 +1100,7 @@ def crawl_from_excel(excel_path: str, start_date: str = None, end_date: str = No
         # 因此仅作为默认 URL 保留，渲染失败时由 crawl_ozon_reviews_by_url 去掉后重试。
         sep = '&' if '?' in url else '?'
         url = url.split('#')[0] + sep + 'sort=published_at_desc'
-        print(f"🔀 已启用按时间排序: {url}")
+        _console_print(f"🔀 已启用按时间排序: {url}")
 
         print(f"\n{'='*60}")
         print(f"处理第 {ordinal}/{len(ozon_df)} 个链接")
@@ -1112,7 +1122,7 @@ def crawl_from_excel(excel_path: str, start_date: str = None, end_date: str = No
                     save_data_to_file(questions, 'ozon_questions.xlsx', 'questions')
 
         except Exception as e:
-            print(f"❌ 处理链接时出错: {e}")
+            _console_print(f"❌ 处理链接时出错: {e}")
             if "OZON access blocked" in str(e):
                 raise
             failures.append(f"{model_name}: {e}")
