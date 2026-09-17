@@ -67,6 +67,13 @@ class TestDashboardFrontend(unittest.TestCase):
         ):
             self.assertIn(token, self.html)
 
+    def test_governance_copy_is_honest(self):
+        charts = (DASHBOARD / "charts.js").read_text(encoding="utf-8")
+        self.assertIn("不是随机 A/B 实验", self.html)
+        self.assertIn("function initGovernance", charts)
+        self.assertIn("buildGovernanceView", charts)
+        self.assertNotIn("mockGovernance", charts)
+
 
 if __name__ == "__main__":
     unittest.main()

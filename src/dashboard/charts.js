@@ -16,11 +16,23 @@ function disposeChart(id){
   if(chartInstances[id]){chartInstances[id].dispose();delete chartInstances[id]}
 }
 
+function renderEmptyState(target,message){
+  const el=typeof target==='string'?document.getElementById(target):target;
+  if(!el)return;
+  el.innerHTML=`<div class="empty-state"><div><div class="empty-icon">◇</div><h3>暂无可用数据</h3><p>${escapeHtml(message)}</p></div></div>`;
+}
+
 /* ═══════════════════════════════════
    PAGE: OVERVIEW
    ═══════════════════════════════════ */
+let overviewInited=false;
 function initOverview(){
-  if(!D)return;
+  if(overviewInited||!D||!D.kpi)return;overviewInited=true;
+
+  const headline=document.getElementById('overviewHeadline');
+  const narrative=document.getElementById('overviewNarrative');
+  if(headline)headline.textContent=`平均评分 ${D.kpi.avg_rating||'—'}，好评率 ${D.kpi.positive_rate||'—'}%`;
+  if(narrative)narrative.textContent=`当前覆盖 ${Number(D.kpi.total_records||0).toLocaleString()} 条反馈、${Number(D.kpi.product_count||0).toLocaleString()} 个产品；结合趋势与差评诊断定位优先问题。`;
 
   // KPIs
   const kpis=[
@@ -165,7 +177,7 @@ function initSentiment(){
   // Negative wordcloud
   if(D.wordcloud_negative){
     initChart('sentNegCloud').setOption({tooltip:{show:true},series:[{type:'wordCloud',shape:'diamond',sizeRange:[12,40],rotationRange:[-20,20],gridSize:5,
-      textStyle:{fontFamily:"'PingFang SC','Microsoft YaHei'",color:()=>['#f778ba0a0','#f85149','#f0883e','#f0883e','#f85149'][Math.floor(Math.random()*5)]},
+      textStyle:{fontFamily:"'PingFang SC','Microsoft YaHei'",color:()=>['#ff6b7a','#ff8a65','#f5b942','#ff8a65','#ff6b7a'][Math.floor(Math.random()*5)]},
       data:D.wordcloud_negative.slice(0,40)}]});
   }
 
@@ -202,9 +214,9 @@ function initProducts(){
     card.innerHTML=`
       <div class="pname">${escapeHtml(p.name)}</div>
       <div class="pstats">
-        <span>📊 ${p.total.toLocaleString()} 条数据</span>
-        <span>⭐ ${p.avg_rating}</span>
-        <span>🏅 ${p.five_star_pct}% 五星</span>
+        <span>${p.total.toLocaleString()} 条反馈</span>
+        <span>${p.avg_rating} 平均分</span>
+        <span>${p.five_star_pct}% 五星</span>
       </div>
       <div class="psummary">${escapeHtml(cleanSummary)||'摘要生成中...'}</div>
       <div class="pbar"><div class="pbar-fill" style="width:${(p.total/D.product_ranking[0].total*100)}%"></div></div>`;
@@ -507,7 +519,7 @@ function initDiagnosis(){
   const sevData=D.rootcause.severity||{};
   const sevKeys=Object.keys(sevData);
   if(sevKeys.length>0){
-    const sevColors={'high':'#f778ba0a0','medium':'#d29922','low':'#3fb950'};
+    const sevColors={'high':'#ff6b7a','medium':'#f5b942','low':'#39d98a'};
     initChart('diagSeverity').setOption({...baseOpt(),tooltip:{trigger:'item'},
       series:[{type:'pie',radius:['35%','65%'],center:['50%','50%'],
         itemStyle:{borderRadius:6,borderColor:'rgba(13,17,23,0.8)',borderWidth:2},
@@ -537,5 +549,27 @@ function initDiagnosis(){
   }
 }
 
-/* ── Load overview on page load ── */
-document.addEventListener('DOMContentLoaded',()=>initOverview());
+/* ═══════════════════════════════════
+   PAGE: GOVERNANCE
+   ═══════════════════════════════════ */
+let governanceInited=false;
+function initGovernance(){
+  if(governanceInited||!D)return;governanceInited=true;
+  const target=document.getElementById('governanceContent');
+  if(!target)return;
+  const view=DashboardCore.buildGovernanceView(D.governance||null);
+  if(!view.available){
+    target.innerHTML=`<article class="card empty-state"><div><div class="empty-icon">◇</div><h3>治理证据尚未接入当前看板</h3><p>当前页面不会用 0 或推断值替代缺失指标。生成可信管道产物后，通过环境变量把 manifest 与来源对照 JSON 注入看板。</p><code class="command">python src/dashboard/generate_stats.py</code></div></article>`;
+    return;
+  }
+  const manifest=view.manifest;
+  const comparison=view.comparison;
+  const metricHtml=view.metrics.map(metric=>`<div class="governance-metric"><span>${escapeHtml(metric.label)}</span><strong>${DashboardCore.formatMetric(metric.value)}</strong></div>`).join('');
+  const passRate=manifest?DashboardCore.formatMetric(manifest.quality_pass_rate,{suffix:'%',digits:1}):'—';
+  const gate=manifest&&manifest.quality_gate_status?String(manifest.quality_gate_status):'unavailable';
+  const sampleSizes=comparison&&comparison.sample_sizes?Object.entries(comparison.sample_sizes).map(([key,value])=>`${escapeHtml(key)}: ${DashboardCore.formatMetric(value)}`).join(' · '):'—';
+  const limitations=comparison&&comparison.limitations?escapeHtml(comparison.limitations):'来源比较不可用或尚未生成。';
+  target.innerHTML=`
+    ${manifest?`<div class="grid"><article class="card"><div class="card-head"><div><h3 class="card-title">本次运行质量门禁</h3><p class="card-subtitle">Run ${escapeHtml(manifest.run_id||'—')}</p></div><span class="badge ${gate==='passed'?'passed':'failed'}">${escapeHtml(gate)}</span></div><div class="governance-grid">${metricHtml}</div><div class="governance-detail"><div class="detail-row"><span>质量通过率</span><strong>${passRate}</strong></div><div class="detail-row"><span>生成时间</span><strong>${escapeHtml(manifest.generated_at||'—')}</strong></div></div></article></div>`:''}
+    <div class="grid grid-half"><article class="card"><div class="card-head"><div><h3 class="card-title">来源对照研究</h3><p class="card-subtitle">Matched-source observational study</p></div><span class="badge">${comparison&&comparison.status?escapeHtml(comparison.status):'unavailable'}</span></div><div class="detail-row"><span>匹配产品数</span><strong>${comparison?DashboardCore.formatMetric(comparison.matched_product_count):'—'}</strong></div><div class="detail-row"><span>来源样本量</span><strong>${sampleSizes}</strong></div><div class="detail-row"><span>评分比较</span><strong>${comparison&&comparison.rating_comparison?'available':'unavailable'}</strong></div></article><article class="card"><div class="card-head"><div><h3 class="card-title">方法边界</h3><p class="card-subtitle">Interpretation guardrails</p></div></div><p class="limitations">${limitations}<br><br>该比较不是随机 A/B 实验，不能把来源差异直接解释为因果效果。</p></article></div>`;
+}
