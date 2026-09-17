@@ -16,6 +16,82 @@
 
 ---
 
+## 可信多源数据链路（2026 秋招优化版）
+
+本项目已在原有“爬虫 → Pandas/MySQL → ECharts”链路之外，增加一套可独立复现的数据工程路径：
+
+```text
+自主采集（业务主数据） + Wildberries CC0 公开子集（外部验证）
+                            ↓
+统一数据契约与稳定 product_id
+                            ↓
+质量评分 / 指标准入 / 可审计去重
+                            ↓
+ODS → DWD → DWS → ADS（本地参考实现 + Spark 3.5 实现）
+                            ↓
+来源对照报告 / 管道离线基准 / 仪表盘治理数据
+```
+
+边界说明：外部数据不会无标记混入总体 KPI；来源比较是匹配商品后的观察性研究，不是随机 A/B Test；本轮不训练机器学习模型。当前 2 核 2 GiB ECS 仅运行受控的 Spark local 作业，不部署 Hive、Kafka、MLflow 或常驻 Airflow。
+
+### 一次跑通小型可审计链路
+
+```bash
+python src/run_pipeline.py \
+  --trusted-input tests/fixtures/self_review.csv:self \
+  --trusted-input tests/fixtures/public_wb_question.jsonl:public_wb_question \
+  --trusted-output tmp/platform-e2e \
+  --run-id demo
+
+python scripts/run_source_comparison.py \
+  --input tmp/platform-e2e/run_id=demo/dwd/accepted.jsonl \
+  --output-dir tmp/platform-e2e/run_id=demo/ads
+
+python scripts/run_pipeline_benchmark.py \
+  --input tmp/platform-e2e/run_id=demo/dwd/accepted.jsonl \
+  --output tmp/platform-e2e/run_id=demo/ads/pipeline_benchmark.json
+
+python scripts/run_quality_audit.py \
+  --input tmp/platform-e2e/run_id=demo/dwd/accepted.jsonl \
+  --output tmp/platform-e2e/run_id=demo/ads/quality_audit.json \
+  --minimum-pass-rate 40
+```
+
+产物包括原始层、接受/隔离明细、运行 manifest、业务 marts、来源对照 JSON/HTML、管道基准和质量门禁报告。同一 `run_id` 重跑会覆盖同批次产物，便于复现和对账。
+
+### Spark 分层作业
+
+建议使用 Python 3.11/3.12 与 `requirements-spark.txt`；本机 Python 3.14 不用于 Spark worker。
+
+```bash
+python scripts/run_spark_pipeline.py \
+  --input tests/fixtures/self_review.csv \
+  --input-format csv \
+  --source-dataset self_crawled \
+  --dataset-role business_primary \
+  --output-root tmp/spark-smoke \
+  --master local[1] \
+  --run-id smoke
+```
+
+### 外部数据最小化接入
+
+```bash
+# 先检查远端数据分片与过滤条件
+python scripts/fetch_public_wb_subset.py \
+  --dataset nyuuzyou/wb-questions \
+  --brands vivo iqoo --limit 1000 \
+  --output tmp/public-wb/questions.parquet \
+  --metadata-output tmp/public-wb/questions.metadata.json \
+  --dry-run
+
+# 去掉 --dry-run 后逐分片扫描；达到 limit 即停止
+```
+
+公开数据只用于验证，并保留数据集 URL、CC0-1.0 许可证、过滤条件、扫描分片数和提取时间。详细设计见 [架构说明](docs/architecture.md)、[数据字典](docs/data_dictionary.md)、[指标字典](docs/metric_dictionary.md)和[优化过程记录](docs/project_optimization_log.md)。
+
+---
+
 ## 快速启动
 
 ```bash

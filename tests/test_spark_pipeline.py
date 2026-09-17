@@ -6,6 +6,10 @@ import unittest
 @unittest.skipUnless(
     __import__("importlib").util.find_spec("pyspark"), "pyspark is not installed"
 )
+@unittest.skipIf(
+    sys.version_info >= (3, 14),
+    "Run Spark worker tests with the documented Python 3.12 runtime",
+)
 class TestSparkPipeline(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

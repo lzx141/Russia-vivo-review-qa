@@ -106,13 +106,13 @@ is_text_eligible, is_product_eligible
 |---|---|---|---|
 | 0. 基线审计 | 已完成 | `notebooks/current_data_quality_assessment.ipynb` | 原始/合并行数、缺失率、平台分布、翻译覆盖 |
 | 1. 简历基线修订 | 已完成 | 数据分析版、数据工程版一页 PDF | 均为单页 A4；日期、文本与页面渲染检查通过 |
-| 2. 数据契约与稳定主键 | 未开始 | schema、映射规则、单元测试 | 规则测试和样本人工核验 |
-| 3. Spark 分层管道 | 未开始 | ODS/DWD/DWS/ADS 作业 | 行数对账、幂等性、Parquet 输出 |
-| 4. 质量评分与隔离 | 未开始 | 质量规则、隔离表、运行 manifest | 固定审计样本与质量门禁 |
-| 5. 外部数据接入 | 未开始 | WB 目标子集、来源元数据 | 许可证、字段映射、匹配覆盖率 |
-| 6. 数据源对照研究 | 未开始 | Notebook、HTML 报告、ADS 指标 | 统计检验、效应量、置信区间 |
-| 7. 离线管道 A/B | 未开始 | 对照报告 | 准确率、稳定性、性能实测 |
-| 8. 看板与文档 | 未开始 | 质量中心、来源对照、可信度页面 | 页面数据与 ADS 对账 |
+| 2. 数据契约与稳定主键 | 已完成 | YAML contract、来源适配器、稳定商品 ID | 契约与适配器单测通过 |
+| 3. Spark 分层管道 | 已完成（本地验证） | ODS/DWD/DWS/ADS Parquet 作业 | Python 3.12 + Spark 3.5.9 单测与 smoke run 通过；尚未部署定时任务 |
+| 4. 质量评分与隔离 | 已完成 | 质量规则、四类指标准入、隔离表、manifest | fixture 端到端 4/4 接受，门禁 100%；仅为测试样本结果 |
+| 5. 外部数据接入 | 已完成（有限样本） | WB 目标子集、来源元数据 | 远程真实抽取 10 条，扫描 1/8 分片即达到上限；CC0 元数据保留 |
+| 6. 数据源对照研究 | 已完成（框架与 fixture） | 匹配 cohort、JSON/HTML、业务 marts | fixture 得到 4 条匹配记录；真实业务结论仍需扩大共同商品样本 |
+| 7. 离线管道 A/B | 已完成（工程基准） | 同输入管道基准 JSON | 输出保留、隔离、重复、准入与耗时；无人工标签，不宣称准确率 |
+| 8. 看板与文档 | 部分完成 | 治理 JSON 接口、架构/数据/指标文档 | 后端 loader 单测通过；独立质量中心前端页面尚未实现 |
 
 ## 7. 变更日志
 
@@ -123,6 +123,24 @@ is_text_eligible, is_product_eligible
 - 建立本优化过程记录。
 - 完成两份一页简历修订；益普索日期统一为“2026年1月–2026年9月”。
 - 数据分析版加入可复现数据审计结果，数据工程版加入已验证的 Hadoop/Spark/HDFS 环境实践；未提前声明规划中的外部数据融合和 Spark 分层成果。
+- 完成统一数据契约、稳定商品主键、四类指标准入、质量评分与审计式跨来源去重（`eefb0f1`、`c94f000`）。
+- 完成本地多源参考管道和 Spark ODS/DWD/DWS/ADS 管道（`a6a4d31`、`35c0c8c`）。
+- 修复 Python 3.14 与 PySpark worker 不兼容问题：Spark 验证固定使用 Python 3.12 + PySpark 3.5.9；manifest 改为 JVM `range` 构造，避免 Python worker 超时。
+- 完成 WB CC0 数据子集工具（`a5d90c0`）：支持 schema drift、参数化过滤、逐分片扫描与达到上限即停；真实远端 smoke test 提取 10 条。
+- 完成匹配来源对照、业务 marts、JSON/HTML 报告和离线管道工程基准（`60c1245`、`058aa66`、`cca6af1`）。
+- 完成统一 CLI、质量审计和 dashboard 治理证据加载（`87c5803`）；前端独立质量中心仍为遗留项。
+
+### 验证命令
+
+```text
+python -m unittest tests.test_external_wb -v
+python -m unittest tests.test_source_comparison tests.test_business_marts -v
+python src/run_pipeline.py --trusted-input ... --trusted-output ... --run-id integration
+python scripts/run_source_comparison.py --input ... --output-dir ...
+python scripts/run_pipeline_benchmark.py --input ... --output ...
+Python 3.12: python -m unittest tests.test_spark_pipeline -v
+Python 3.12: python scripts/run_spark_pipeline.py ... --master local[1]
+```
 
 ## 8. 简历同步规则
 
