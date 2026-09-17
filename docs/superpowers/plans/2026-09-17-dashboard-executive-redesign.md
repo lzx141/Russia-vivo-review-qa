@@ -42,7 +42,7 @@
 - Consumes: current `src/dashboard/index.html` and existing chart IDs.
 - Produces: executable structure contract and desired pure-function API.
 
-- [ ] **Step 1: Write the static structure tests**
+- [x] **Step 1: Write the static structure tests**
 
 ```python
 from html.parser import HTMLParser
@@ -72,7 +72,7 @@ class TestDashboardFrontend(unittest.TestCase):
             self.assertIn(token, html)
 ```
 
-- [ ] **Step 2: Write the Node behavior tests**
+- [x] **Step 2: Write the Node behavior tests**
 
 ```javascript
 const test = require('node:test');
@@ -92,7 +92,7 @@ test('buildGovernanceView never fabricates missing metrics', () => {
 });
 ```
 
-- [ ] **Step 3: Run both tests and verify expected failures**
+- [x] **Step 3: Run both tests and verify expected failures**
 
 Run: `python -m unittest tests.test_dashboard_frontend -v`
 
@@ -102,7 +102,7 @@ Run: `node --test tests/dashboard_core.test.js`
 
 Expected: FAIL because `dashboard_core.js` does not exist.
 
-- [ ] **Step 4: Commit the failing contract tests**
+- [x] **Step 4: Commit the failing contract tests**
 
 ```bash
 git add tests/test_dashboard_frontend.py tests/dashboard_core.test.js
@@ -120,7 +120,7 @@ git commit -m "test: define executive dashboard contract"
 - Consumes: existing chart IDs and script loading order.
 - Produces: eight `.page` sections, `[data-page]` navigation buttons, `#mobileMenu`, `#navBackdrop`, `#mainContent`, `#governanceContent`.
 
-- [ ] **Step 1: Extract all inline CSS and introduce design tokens**
+- [x] **Step 1: Extract all inline CSS and introduce design tokens**
 
 Create `styles.css` with tokens beginning:
 
@@ -144,7 +144,7 @@ Create `styles.css` with tokens beginning:
 
 Add component classes for skip link, sidebar, nav button, topbar, status pill, KPI, card, chart, controls, modal, empty state and governance panels. Add breakpoints at 1200px, 768px and 480px plus `prefers-reduced-motion`.
 
-- [ ] **Step 2: Replace the app shell with semantic markup**
+- [x] **Step 2: Replace the app shell with semantic markup**
 
 In `index.html`:
 
@@ -156,13 +156,13 @@ In `index.html`:
 - add `page-governance` with `governanceContent`, manifest metrics, source comparison area and limitations area;
 - load `dashboard_core.js` before `app.js`.
 
-- [ ] **Step 3: Run the static contract test**
+- [x] **Step 3: Run the static contract test**
 
 Run: `python -m unittest tests.test_dashboard_frontend -v`
 
 Expected: PASS for structure, preserved IDs and accessibility nodes.
 
-- [ ] **Step 4: Validate HTML references and JavaScript syntax**
+- [x] **Step 4: Validate HTML references and JavaScript syntax**
 
 Run: `python -m unittest tests.test_dashboard_frontend -v`
 
@@ -170,7 +170,7 @@ Run: `node --check src/dashboard/app.js && node --check src/dashboard/charts.js`
 
 Expected: all commands exit 0.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/dashboard/index.html src/dashboard/styles.css tests/test_dashboard_frontend.py
@@ -190,7 +190,7 @@ git commit -m "feat: redesign dashboard shell and visual system"
 - Produces: `buildGovernanceView(governance: object | null) -> object`
 - Exposes: `window.DashboardCore` in browsers and `module.exports` in Node.
 
-- [ ] **Step 1: Implement the pure functions minimally**
+- [x] **Step 1: Implement the pure functions minimally**
 
 ```javascript
 (function(root, factory) {
@@ -232,13 +232,13 @@ git commit -m "feat: redesign dashboard shell and visual system"
 });
 ```
 
-- [ ] **Step 2: Run Node tests and verify green**
+- [x] **Step 2: Run Node tests and verify green**
 
 Run: `node --test tests/dashboard_core.test.js`
 
 Expected: all tests pass.
 
-- [ ] **Step 3: Refactor `app.js` around a single navigation function**
+- [x] **Step 3: Refactor `app.js` around a single navigation function**
 
 Implement `navigateTo(route, {updateHash = true} = {})` to:
 
@@ -251,7 +251,7 @@ Implement `navigateTo(route, {updateHash = true} = {})` to:
 
 Bind `hashchange`, nav clicks, mobile menu, backdrop, Escape and modal focus behavior. Guard every optional DOM node and render a styled fatal data state when `DASHBOARD_DATA` is missing.
 
-- [ ] **Step 4: Validate behavior module and syntax**
+- [x] **Step 4: Validate behavior module and syntax**
 
 Run: `node --test tests/dashboard_core.test.js`
 
@@ -259,7 +259,7 @@ Run: `node --check src/dashboard/dashboard_core.js && node --check src/dashboard
 
 Expected: all commands exit 0.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/dashboard/dashboard_core.js src/dashboard/app.js tests/dashboard_core.test.js
@@ -278,7 +278,7 @@ git commit -m "feat: add accessible dashboard routing and state"
 - Consumes: `DashboardCore.buildGovernanceView(D.governance)`.
 - Produces: `initGovernance()`, `renderEmptyState(element, message)`, consistent ECharts option helpers.
 
-- [ ] **Step 1: Extend the static test for governance honesty**
+- [x] **Step 1: Extend the static test for governance honesty**
 
 ```python
 def test_governance_copy_is_honest(self):
@@ -290,17 +290,17 @@ def test_governance_copy_is_honest(self):
     self.assertNotIn("mockGovernance", charts)
 ```
 
-- [ ] **Step 2: Run the targeted test and verify it fails**
+- [x] **Step 2: Run the targeted test and verify it fails**
 
 Run: `python -m unittest tests.test_dashboard_frontend.TestDashboardFrontend.test_governance_copy_is_honest -v`
 
 Expected: FAIL because `initGovernance` is absent.
 
-- [ ] **Step 3: Add shared ECharts helpers**
+- [x] **Step 3: Add shared ECharts helpers**
 
 Update `PAL`, `COLORS` and `baseOpt`; add helpers for axis, tooltip, legend, linear gradients and empty state. Preserve every data field and chart function currently used. Correct invalid color literals encountered during the touched chart paths.
 
-- [ ] **Step 4: Implement `initGovernance()`**
+- [x] **Step 4: Implement `initGovernance()`**
 
 Use only `D.governance` through `DashboardCore.buildGovernanceView`:
 
@@ -309,14 +309,14 @@ Use only `D.governance` through `DashboardCore.buildGovernanceView`:
 - comparison: render sample sizes, matched product count, text metrics and limitations;
 - absent rating comparison: state that the source lacks valid ratings rather than showing zero.
 
-- [ ] **Step 5: Enrich existing pages using current data only**
+- [x] **Step 5: Enrich existing pages using current data only**
 
 - Overview: add a data-status rail and concise headline insight derived from KPI/trend values;
 - Products: replace emoji stats with styled labels and safe escaped text;
 - Diagnosis: add count/percentage context to severity and root-cause cards;
 - All pages: render card-local empty states when required fields are missing.
 
-- [ ] **Step 6: Run targeted tests and syntax checks**
+- [x] **Step 6: Run targeted tests and syntax checks**
 
 Run: `python -m unittest tests.test_dashboard_frontend -v`
 
@@ -326,7 +326,7 @@ Run: `node --check src/dashboard/charts.js`
 
 Expected: all commands pass.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/dashboard/charts.js src/dashboard/index.html src/dashboard/styles.css tests/test_dashboard_frontend.py
@@ -344,13 +344,13 @@ git commit -m "feat: add governance and executive chart experience"
 - Consumes: completed static dashboard.
 - Produces: verified browser behavior, updated project documentation and a pushed feature branch.
 
-- [ ] **Step 1: Start a local static server**
+- [x] **Step 1: Start a local static server**
 
 Run: `python -m http.server 8899 --directory src/dashboard`
 
 Expected: `http://127.0.0.1:8899/` returns the dashboard assets.
 
-- [ ] **Step 2: Perform desktop browser QA**
+- [x] **Step 2: Perform desktop browser QA**
 
 At 1440×900 verify:
 
@@ -363,7 +363,7 @@ At 1440×900 verify:
 
 Capture a screenshot under ignored `tmp/dashboard-qa/desktop.png`.
 
-- [ ] **Step 3: Perform mobile browser QA**
+- [x] **Step 3: Perform mobile browser QA**
 
 At 390×844 verify:
 
@@ -375,11 +375,11 @@ At 390×844 verify:
 
 Capture a screenshot under ignored `tmp/dashboard-qa/mobile.png`.
 
-- [ ] **Step 4: Update documentation with implemented facts**
+- [x] **Step 4: Update documentation with implemented facts**
 
 README must list the eight pages, local launch command, hash navigation and governance behavior. Optimization log must record the commits, automated tests and browser sizes; do not claim the online deployment has updated until the main branch deployment is observed.
 
-- [ ] **Step 5: Run the complete verification suite**
+- [x] **Step 5: Run the complete verification suite**
 
 Run: `python -m unittest discover tests -v`
 
@@ -393,7 +393,7 @@ Run: `git diff --check`
 
 Expected: all tests and syntax checks pass; the default suite may skip the three Spark worker tests on Python 3.14, which must pass in the separate Python 3.12 command.
 
-- [ ] **Step 6: Check commit scope and secrets**
+- [x] **Step 6: Check commit scope and secrets**
 
 Run: `git status --short`
 
@@ -401,7 +401,7 @@ Run: `git grep -n -I -E "(sk-[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16}|-----BEGIN (RSA
 
 Expected: only intended tracked frontend/docs changes; secret scan may match documented placeholder `sk-your-deepseek-api-key` and no real credential.
 
-- [ ] **Step 7: Commit and push**
+- [x] **Step 7: Commit and push**
 
 ```bash
 git add README.md docs/project_optimization_log.md docs/superpowers/plans/2026-09-17-dashboard-executive-redesign.md
