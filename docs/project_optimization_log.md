@@ -112,7 +112,7 @@ is_text_eligible, is_product_eligible
 | 5. 外部数据接入 | 已完成（有限样本） | WB 目标子集、来源元数据 | 远程真实抽取 10 条，扫描 1/8 分片即达到上限；CC0 元数据保留 |
 | 6. 数据源对照研究 | 已完成（框架与 fixture） | 匹配 cohort、JSON/HTML、业务 marts | fixture 得到 4 条匹配记录；真实业务结论仍需扩大共同商品样本 |
 | 7. 离线管道 A/B | 已完成（工程基准） | 同输入管道基准 JSON | 输出保留、隔离、重复、准入与耗时；无人工标签，不宣称准确率 |
-| 8. 看板与文档 | 部分完成 | 治理 JSON 接口、架构/数据/指标文档 | 后端 loader 单测通过；独立质量中心前端页面尚未实现 |
+| 8. 看板与文档 | 已完成 | Executive Intelligence 响应式看板、独立数据治理页、架构/数据/指标文档 | Python/Node 契约测试通过；桌面 1280px 与移动端 390px 浏览器复核通过 |
 
 ## 7. 变更日志
 
@@ -128,7 +128,9 @@ is_text_eligible, is_product_eligible
 - 修复 Python 3.14 与 PySpark worker 不兼容问题：Spark 验证固定使用 Python 3.12 + PySpark 3.5.9；manifest 改为 JVM `range` 构造，避免 Python worker 超时。
 - 完成 WB CC0 数据子集工具（`a5d90c0`）：支持 schema drift、参数化过滤、逐分片扫描与达到上限即停；真实远端 smoke test 提取 10 条。
 - 完成匹配来源对照、业务 marts、JSON/HTML 报告和离线管道工程基准（`60c1245`、`058aa66`、`cca6af1`）。
-- 完成统一 CLI、质量审计和 dashboard 治理证据加载（`87c5803`）；前端独立质量中心仍为遗留项。
+- 完成统一 CLI、质量审计和 dashboard 治理证据加载（`87c5803`）。
+- 重构前端为 Executive Intelligence 数据产品：保留七个分析页面并新增数据治理页，加入 hash 路由、移动端抽屉、键盘/低动态无障碍支持和真实数据空状态；治理数据缺失时不以 0 或推断值伪装结果。
+- 浏览器验收覆盖桌面端总览、治理页、390px 移动端导航、产品详情弹层和横向溢出检查；控制台无错误。
 
 ### 验证命令
 
@@ -138,6 +140,11 @@ python -m unittest tests.test_source_comparison tests.test_business_marts -v
 python src/run_pipeline.py --trusted-input ... --trusted-output ... --run-id integration
 python scripts/run_source_comparison.py --input ... --output-dir ...
 python scripts/run_pipeline_benchmark.py --input ... --output ...
+python -m unittest tests.test_dashboard_frontend -v
+node --test tests/dashboard_core.test.js
+node --check src/dashboard/dashboard_core.js
+node --check src/dashboard/app.js
+node --check src/dashboard/charts.js
 Python 3.12: python -m unittest tests.test_spark_pipeline -v
 Python 3.12: python scripts/run_spark_pipeline.py ... --master local[1]
 ```

@@ -155,9 +155,11 @@ Russia-vivo-review-qa/
 │   │   └── translate_deepseek.py  # ★ 新增：DeepSeek 批量翻译（增量合并 + 断点续传）
 │   └── dashboard/             # 可视化大屏
 │       ├── __init__.py
-│       ├── index.html         # 主页面（7 页面交互式大屏）
-│       ├── app.js             # 全局状态 + 导航 + 粒子背景
-│       ├── charts.js          # 各页面图表渲染函数
+│       ├── index.html         # 主页面（8 页面响应式数据产品）
+│       ├── styles.css         # Executive Intelligence 设计系统与响应式布局
+│       ├── dashboard_core.js  # 可测试的路由、格式化与治理视图模型
+│       ├── app.js             # hash 路由、导航抽屉、状态与无障碍交互
+│       ├── charts.js          # 各页面图表与治理证据渲染
 │       ├── russia_cities.js   # 俄罗斯城市坐标（地图涟漪用）
 │       ├── dashboard_data.js  # 大屏数据文件（自动生成）
 │       ├── Russia.js          # 俄罗斯地图 GeoJSON
@@ -180,8 +182,8 @@ Russia-vivo-review-qa/
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                         前端展示层                                │
-│   ECharts 5.5 + WordCloud + GeoMap + 俄罗斯地图 + 原生 JS       │
-│   app.js（全局） + charts.js（图表） + 按页面懒加载              │
+│   Executive Intelligence UI + ECharts 5.5 + WordCloud + GeoMap │
+│   hash 路由 + 响应式抽屉 + 键盘交互 + 按页面懒加载               │
 ├─────────────────────────────────────────────────────────────────┤
 │                         数据处理层                                │
 │   generate_stats.py → jieba + TF-IDF + SQL 聚合 + LLM 结果解析  │
@@ -257,6 +259,9 @@ export DEEPSEEK_API_KEY=sk-your-deepseek-api-key
 | **时间轴** | 日历热力图 + DataZoom 趋势图 + 评论长度分布 | 时间滑块拖拽、图表缩放 |
 | **问答洞察** | 意图分类 + 问题词云 + 评分-长度散点图 + 活跃用户 | DataZoom 缩放 |
 | **差评诊断** | 根因排行 + 严重度分布 + 差评关键词（LLM Root Cause） | hover 查看 |
+| **数据治理** | 运行清单、质量门禁、隔离/重复记录和来源对照证据 | 缺少真实治理产物时明确显示 unavailable，不用推断值补齐 |
+
+界面支持 URL hash 恢复、桌面/移动端自适应、移动端导航抽屉、键盘焦点与 Escape 关闭弹层，并遵循 `prefers-reduced-motion`。所有视觉资源均随项目本地托管，不依赖外部 CDN。
 
 ---
 
