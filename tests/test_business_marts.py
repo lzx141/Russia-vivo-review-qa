@@ -45,6 +45,9 @@ class TestBusinessMarts(unittest.TestCase):
         self.assertEqual(source["quality_pass_rate"], 50.0)
         self.assertEqual(marts["monthly_trend"][0]["month"], "2026-01")
         self.assertEqual(marts["monthly_trend"][0]["eligible_records"], 1)
+        product = marts["product_summary"][0]
+        self.assertEqual(product["total_records"], 2)
+        self.assertEqual(product["eligible_records"], 2)
 
     def test_empty_input_returns_named_empty_marts(self):
         from src.analysis.business_marts import build_business_marts

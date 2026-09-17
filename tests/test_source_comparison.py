@@ -58,6 +58,8 @@ class TestSourceComparison(unittest.TestCase):
         self.assertEqual(result["sample_sizes"]["business_primary"], 2)
         self.assertEqual(result["sample_sizes"]["external_validation"], 2)
         self.assertIsNone(result["rating_comparison"])
+        self.assertIn("median_text_length", result)
+        self.assertIn("rank_biserial_effect", result["text_length_mann_whitney"])
         self.assertIn("not a randomized A/B test", result["limitations"])
         self.assertIn("rating comparison unavailable", result["limitations"])
 

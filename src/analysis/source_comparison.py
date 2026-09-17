@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import random
 from collections import defaultdict
-from statistics import mean
+from statistics import mean, median
 from typing import Any, Iterable, Mapping
 
 from scipy.spatial.distance import jensenshannon
@@ -90,7 +90,12 @@ def _mann_whitney(left: list[float], right: list[float]) -> dict[str, float] | N
     if not left or not right:
         return None
     result = mannwhitneyu(left, right, alternative="two-sided")
-    return {"statistic": round(float(result.statistic), 4), "p_value": round(float(result.pvalue), 6)}
+    effect = 1 - (2 * float(result.statistic)) / (len(left) * len(right))
+    return {
+        "statistic": round(float(result.statistic), 4),
+        "p_value": round(float(result.pvalue), 6),
+        "rank_biserial_effect": round(effect, 4),
+    }
 
 
 def _rating_comparison(by_role: Mapping[str, list[dict[str, Any]]]) -> dict | None:
@@ -162,6 +167,12 @@ def compare_sources(
     }
     rating_result = _rating_comparison(by_role)
     limitations = "observational matched-source comparison; not a randomized A/B test"
+    record_types = {
+        role: sorted({str(row.get("record_type")) for row in by_role[role] if row.get("record_type")})
+        for role in ROLES
+    }
+    if record_types[ROLES[0]] != record_types[ROLES[1]]:
+        limitations += "; record-type mix differs across sources and may confound text metrics"
     if rating_result is None:
         limitations += "; rating comparison unavailable because at least one source has no valid ratings"
     return {
@@ -172,6 +183,10 @@ def compare_sources(
         "mean_text_length": {
             role: round(mean(lengths[role]), 4) if lengths[role] else None for role in ROLES
         },
+        "median_text_length": {
+            role: round(median(lengths[role]), 4) if lengths[role] else None for role in ROLES
+        },
+        "record_types": record_types,
         "text_length_delta_ci_95": _bootstrap_delta(
             lengths[ROLES[0]], lengths[ROLES[1]], seed=seed
         ),

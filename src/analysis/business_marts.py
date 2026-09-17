@@ -49,12 +49,18 @@ def _group(
 ) -> list[dict[str, Any]]:
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
-        if eligibility and not row.get(eligibility):
-            continue
         key = key_fn(row)
         if key is not None and str(key).strip():
             grouped[str(key)].append(row)
-    return [_summary(grouped[key], {key_name: key}) for key in sorted(grouped)]
+    summaries = []
+    for key in sorted(grouped):
+        summary = _summary(grouped[key], {key_name: key})
+        if eligibility:
+            summary["eligible_records"] = sum(
+                bool(row.get(eligibility)) for row in grouped[key]
+            )
+        summaries.append(summary)
+    return summaries
 
 
 def build_business_marts(
@@ -78,8 +84,6 @@ def build_business_marts(
         lambda row: str(row.get("event_date"))[:7] if row.get("event_date") else None,
         eligibility="is_trend_eligible",
     )
-    for row in monthly_trend:
-        row["eligible_records"] = row["total_records"]
     return {
         "quality_summary": quality_summary,
         "source_summary": source_summary,

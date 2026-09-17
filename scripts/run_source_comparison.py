@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import html
 import json
 import sys
 from pathlib import Path
@@ -70,6 +71,18 @@ def main() -> None:
     )
     (args.output_dir / "business_marts.json").write_text(
         json.dumps(marts, ensure_ascii=False, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    report_payload = html.escape(
+        json.dumps(comparison, ensure_ascii=False, indent=2, sort_keys=True)
+    )
+    (args.output_dir / "source_comparison.html").write_text(
+        "<!doctype html><html lang='zh-CN'><meta charset='utf-8'>"
+        "<title>数据源对照报告</title><style>body{font:16px/1.6 system-ui;"
+        "max-width:1000px;margin:40px auto;padding:0 24px}pre{white-space:pre-wrap;"
+        "background:#f6f8fa;padding:20px;border-radius:8px}</style>"
+        "<h1>数据源对照报告</h1><p>该报告是匹配商品后的观察性来源比较，"
+        "不是随机 A/B 实验。</p><pre>" + report_payload + "</pre></html>",
         encoding="utf-8",
     )
     print(
