@@ -61,6 +61,10 @@ def _create_driver(headless: bool = True):
     chrome_opts = ChromeOptions()
     for arg in common_args:
         chrome_opts.add_argument(arg)
+    profile_dir = os.getenv("OZON_CHROME_USER_DATA_DIR", "").strip()
+    if profile_dir:
+        profile_dir = os.path.abspath(os.path.expanduser(profile_dir))
+        chrome_opts.add_argument(f"--user-data-dir={profile_dir}")
     chrome_opts.add_experimental_option("excludeSwitches", ["enable-automation"])
     chrome_opts.add_experimental_option("useAutomationExtension", False)
     driver = webdriver.Chrome(service=Service(), options=chrome_opts)
@@ -133,10 +137,11 @@ def _click_product_card_to_detail(driver, model_name: str, wait: WebDriverWait) 
                     matched = link
                     break
 
-        # 策略3: 回退到第一个链接
         if not matched:
-            matched = links[0]
-            print(f"⚠️ 未找到匹配「{model_name}」的商品，回退点击第一个卡片")
+            _console_print(
+                f"⚠️ 未找到匹配「{model_name}」的商品，跳过无关推荐卡片"
+            )
+            return False
 
         # 点击进入详情页
         driver.execute_script("arguments[0].click();", matched)
@@ -231,7 +236,7 @@ def _url_without_sort(url: str) -> str:
     return base + ("?" + "&".join(kept) if kept else "")
 
 
-def _ensure_detail_page(driver, model_name: str, wait: WebDriverWait) -> None:
+def _ensure_detail_page(driver, model_name: str, wait: WebDriverWait) -> bool:
     """确保停留在商品详情页（若被重定向到搜索页则自动进入）"""
     try:
         body_text = driver.find_element(By.TAG_NAME, "body").text
@@ -262,9 +267,10 @@ def _ensure_detail_page(driver, model_name: str, wait: WebDriverWait) -> None:
 
     if _is_search_redirect_page(driver):
         print("🔍 检测到 OZON 搜索/推荐页（原商品售罄），正在自动进入商品详情页...")
-        _click_product_card_to_detail(driver, model_name, wait)
+        return _click_product_card_to_detail(driver, model_name, wait)
     else:
         print("✅ 已打开商品详情页")
+        return True
 
 def crawl_ozon_reviews_by_url(product_url: str, model_name: str = "Unknown Model",
                                start_date: str = None, end_date: str = None):
@@ -290,7 +296,9 @@ def crawl_ozon_reviews_by_url(product_url: str, model_name: str = "Unknown Model
 
     # 若被重定向到搜索页（商品售罄），自动点击进入商品详情页
     try:
-        _ensure_detail_page(driver, model_name, wait)
+        if not _ensure_detail_page(driver, model_name, wait):
+            driver.quit()
+            return []
     except Exception:
         driver.quit()
         raise
@@ -524,7 +532,9 @@ def _crawl_ozon_qa_legacy(product_url: str, model_name: str = "Unknown Model",
 
     # 若被重定向到搜索页（商品售罄），自动点击进入商品详情页
     try:
-        _ensure_detail_page(driver, model_name, wait)
+        if not _ensure_detail_page(driver, model_name, wait):
+            driver.quit()
+            return []
     except Exception:
         driver.quit()
         raise
@@ -878,7 +888,9 @@ def crawl_ozon_qa_by_url(product_url: str, model_name: str = "Unknown Model",
     time.sleep(random.uniform(5, 8))
 
     try:
-        _ensure_detail_page(driver, model_name, wait)
+        if not _ensure_detail_page(driver, model_name, wait):
+            driver.quit()
+            return []
 
         print("正在滚动到评论区域...")
         try:
