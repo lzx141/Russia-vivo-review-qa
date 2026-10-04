@@ -33,14 +33,21 @@
     return {
       available: Boolean(manifest || comparison),
       status: governance.status,
+      evidenceSource: governance.evidence_source || 'external_artifact',
       metrics: manifest ? [
         {label: '输入记录', value: manifest.input_rows},
         {label: '接受记录', value: manifest.accepted_rows},
         {label: '隔离记录', value: manifest.quarantined_rows},
         {label: '重复记录', value: manifest.duplicate_rows},
+        {label: '日期完整率', value: manifest.date_completeness, suffix: '%', digits: 2},
+        {label: '核心字段完整率', value: manifest.content_completeness, suffix: '%', digits: 2},
+        {label: '翻译覆盖率', value: manifest.translation_coverage, suffix: '%', digits: 2},
       ] : [],
       manifest,
       comparison,
+      sourceCoverage: Array.isArray(governance.source_coverage) ? governance.source_coverage : [],
+      freshness: governance.freshness || {},
+      auditScope: governance.audit_scope || {},
     };
   }
 

@@ -11,6 +11,7 @@
 import json
 import logging
 import os
+import subprocess
 import sys
 from collections import Counter
 from datetime import datetime
@@ -60,6 +61,190 @@ def load_governance_assets(manifest_path=None, comparison_path=None) -> dict:
         "run_manifest": manifest,
         "source_comparison": comparison,
     }
+
+
+def _platform_name(value: str) -> str:
+    text = str(value or "").lower()
+    if "wildberries" in text:
+        return "Wildberries"
+    if "ozon" in text:
+        return "OZON"
+    if "yandex" in text:
+        return "Yandex Market"
+    return str(value or "Unknown")
+
+
+def _dashboard_version() -> str:
+    configured = os.getenv("DEPLOY_COMMIT_SHA", "").strip()
+    if configured:
+        return configured[:12]
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "--short=12", "HEAD"],
+            cwd=os.path.join(os.path.dirname(__file__), "..", ".."),
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except (OSError, subprocess.SubprocessError):
+        return "unavailable"
+
+
+def build_dataset_governance(records, generated_at=None, version=None) -> dict:
+    """Build auditable governance evidence from the published record set."""
+    frame = pd.DataFrame(records).copy()
+    required = (
+        "data_type", "source_file", "author", "publishDate", "rate",
+        "question", "answer", "review", "name", "SKU", "URL", "siteName",
+        "question_zh", "answer_zh", "review_zh",
+    )
+    for column in required:
+        if column not in frame.columns:
+            frame[column] = ""
+    frame = frame.fillna("")
+    now = pd.Timestamp(generated_at or datetime.now())
+    generated_text = now.strftime("%Y-%m-%d %H:%M:%S")
+    version = version or _dashboard_version()
+
+    dates = pd.to_datetime(frame["publishDate"], format="mixed", errors="coerce")
+    rate = pd.to_numeric(frame["rate"], errors="coerce")
+    is_review = frame["data_type"].eq("review")
+    review_text = frame["review"].astype(str).str.strip()
+    question_text = frame["question"].astype(str).str.strip()
+    answer_text = frame["answer"].astype(str).str.strip()
+    essential = (is_review & (review_text.ne("") | rate.between(1, 5))) | (
+        ~is_review & question_text.ne("")
+    )
+    translated = (
+        is_review
+        & (review_text.eq("") | frame["review_zh"].astype(str).str.strip().ne(""))
+    ) | (
+        ~is_review
+        & frame["question_zh"].astype(str).str.strip().ne("")
+        & (answer_text.eq("") | frame["answer_zh"].astype(str).str.strip().ne(""))
+    )
+
+    body = review_text.where(is_review, question_text + "|" + answer_text)
+    identity_columns = (
+        "source_file", "data_type", "author", "publishDate", "rate",
+        "name", "SKU", "URL", "siteName",
+    )
+    for column in identity_columns:
+        body += "|" + frame[column].astype(str).str.strip()
+    empty_body = (is_review & review_text.eq("")) | (~is_review & question_text.eq(""))
+    # Rating-only reviews have no stable content fingerprint. Several customers can
+    # legitimately leave the same rating on the same product and day, so only
+    # text-bearing records participate in exact-content deduplication.
+    duplicate = pd.Series(False, index=frame.index)
+    duplicate.loc[~empty_body] = body[~empty_body].duplicated(keep="first")
+    accepted = dates.notna() & essential & translated & ~duplicate
+
+    total = int(len(frame))
+    accepted_rows = int(accepted.sum())
+    duplicate_rows = int(duplicate.sum())
+    quarantined_rows = total - accepted_rows
+    pass_rate = round(accepted_rows / total * 100, 2) if total else 0.0
+    gate_status = "passed" if total and pass_rate >= 99.0 else "failed"
+
+    def pct(mask) -> float:
+        return round(float(mask.sum()) / total * 100, 2) if total else 0.0
+
+    latest = dates.max() if dates.notna().any() else None
+    earliest = dates.min() if dates.notna().any() else None
+    freshness_days = int((now.normalize() - latest.normalize()).days) if latest is not None else None
+    freshness_status = (
+        "current" if freshness_days is not None and freshness_days <= 45 else "stale"
+    )
+
+    platform = frame["siteName"].map(_platform_name)
+    source_coverage = []
+    for platform_name in sorted(platform.unique()):
+        mask = platform.eq(platform_name)
+        group_dates = dates[mask]
+        group_total = int(mask.sum())
+        source_coverage.append({
+            "platform": platform_name,
+            "total": group_total,
+            "reviews": int((mask & is_review).sum()),
+            "qa": int((mask & ~is_review).sum()),
+            "products": int(frame.loc[mask, "name"].replace("", pd.NA).nunique()),
+            "latest_record_at": (
+                group_dates.max().strftime("%Y-%m-%d %H:%M:%S")
+                if group_dates.notna().any() else None
+            ),
+            "date_completeness": round(group_dates.notna().sum() / group_total * 100, 2),
+            "translation_coverage": round(translated[mask].sum() / group_total * 100, 2),
+        })
+
+    product_platforms = pd.DataFrame({
+        "name": frame.loc[accepted, "name"],
+        "platform": platform[accepted],
+    })
+    matched_products = int(
+        (product_platforms[product_platforms["name"].ne("")]
+         .groupby("name")["platform"].nunique() >= 2).sum()
+    )
+    rating_comparison = {}
+    for platform_name in sorted(platform.unique()):
+        ratings = rate[platform.eq(platform_name) & is_review].dropna()
+        rating_comparison[platform_name] = (
+            round(float(ratings.mean()), 2) if len(ratings) else None
+        )
+
+    manifest = {
+        "run_id": f"dashboard-{version}-{now.strftime('%Y%m%d%H%M%S')}",
+        "input_rows": total,
+        "accepted_rows": accepted_rows,
+        "quarantined_rows": quarantined_rows,
+        "duplicate_rows": duplicate_rows,
+        "quality_pass_rate": pass_rate,
+        "quality_gate_status": gate_status,
+        "date_completeness": pct(dates.notna()),
+        "content_completeness": pct(essential),
+        "translation_coverage": pct(translated),
+        "generated_at": generated_text,
+    }
+    return {
+        "status": "available",
+        "evidence_source": "published_dataset_audit",
+        "run_manifest": manifest,
+        "source_coverage": source_coverage,
+        "freshness": {
+            "status": freshness_status,
+            "latest_record_at": latest.strftime("%Y-%m-%d %H:%M:%S") if latest is not None else None,
+            "lag_days": freshness_days,
+        },
+        "audit_scope": {
+            "version": version,
+            "generated_at": generated_text,
+            "date_range_start": earliest.strftime("%Y-%m-%d") if earliest is not None else None,
+            "date_range_end": latest.strftime("%Y-%m-%d") if latest is not None else None,
+            "rules": ["有效日期", "核心字段", "来源内正文去重", "翻译覆盖"],
+        },
+        "source_comparison": {
+            "status": "available" if len(source_coverage) >= 2 else "insufficient_sources",
+            "matched_product_count": matched_products,
+            "sample_sizes": {item["platform"]: item["total"] for item in source_coverage},
+            "rating_comparison": rating_comparison,
+            "limitations": "各来源样本来自匹配商品后的观察性数据，未进行随机分配。",
+        },
+    }
+
+
+def get_governance_records(data_provider):
+    """Return the exact record population used by the published dashboard."""
+    if data_provider.df is not None:
+        return data_provider.df.copy()
+    columns = (
+        "data_type", "source_file", "author", "publishDate", "rate",
+        "question", "answer", "review", "name", "SKU", "URL", "siteName",
+        "question_zh", "answer_zh", "review_zh",
+    )
+    rows = data_provider.db.fetch_query(
+        "SELECT data_type, source_file, author, publish_date, rate, question, "
+        "answer, review, name, sku, url, site_name, question_zh, answer_zh, review_zh "
+        "FROM translated_records"
+    )
+    return pd.DataFrame(rows, columns=columns)
 
 
 # ════════════════════════════════════════════════════════════
@@ -954,9 +1139,15 @@ def generate_all_data() -> dict:
     logger.info("正在生成统计数据...")
 
     # 基础统计（来自 DB 或 CSV）
+    generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    governance = load_governance_assets()
+    if governance["status"] == "unavailable":
+        governance = build_dataset_governance(
+            get_governance_records(provider), generated_at=generated_at
+        )
     data = {
         "meta": {
-            "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "generated_at": generated_at,
         },
         "kpi": provider.get_kpi(),
         "rating_dist": provider.get_rating_dist(),
@@ -969,7 +1160,7 @@ def generate_all_data() -> dict:
         "source_dist": provider.get_source_dist(),
         "rating_length_scatter": provider.get_rating_length_scatter(),
         "product_monthly": provider.get_product_monthly(),
-        "governance": load_governance_assets(),
+        "governance": governance,
     }
 
     # 词云（TF-IDF 改进）

@@ -1,8 +1,8 @@
 // Auto-generated dashboard data
-// Generated at: 2026-10-04 12:30:19
+// Generated at: 2026-10-04 12:56:26
 const DASHBOARD_DATA = {
   "meta": {
-    "generated_at": "2026-10-04 12:30:09"
+    "generated_at": "2026-10-04 12:56:26"
   },
   "kpi": {
     "total_records": 86669,
@@ -4753,9 +4753,85 @@ const DASHBOARD_DATA = {
     }
   },
   "governance": {
-    "status": "unavailable",
-    "run_manifest": null,
-    "source_comparison": null
+    "status": "available",
+    "evidence_source": "published_dataset_audit",
+    "run_manifest": {
+      "run_id": "dashboard-7a7715be412c-20261004125626",
+      "input_rows": 86669,
+      "accepted_rows": 86589,
+      "quarantined_rows": 80,
+      "duplicate_rows": 80,
+      "quality_pass_rate": 99.91,
+      "quality_gate_status": "passed",
+      "date_completeness": 100.0,
+      "content_completeness": 100.0,
+      "translation_coverage": 100.0,
+      "generated_at": "2026-10-04 12:56:26"
+    },
+    "source_coverage": [
+      {
+        "platform": "OZON",
+        "total": 6097,
+        "reviews": 4658,
+        "qa": 1439,
+        "products": 17,
+        "latest_record_at": "2026-09-29 00:00:00",
+        "date_completeness": 100.0,
+        "translation_coverage": 100.0
+      },
+      {
+        "platform": "Wildberries",
+        "total": 80358,
+        "reviews": 50808,
+        "qa": 29550,
+        "products": 23,
+        "latest_record_at": "2026-09-30 07:11:00",
+        "date_completeness": 100.0,
+        "translation_coverage": 100.0
+      },
+      {
+        "platform": "Yandex Market",
+        "total": 214,
+        "reviews": 214,
+        "qa": 0,
+        "products": 13,
+        "latest_record_at": "2026-05-31 00:00:00",
+        "date_completeness": 100.0,
+        "translation_coverage": 100.0
+      }
+    ],
+    "freshness": {
+      "status": "current",
+      "latest_record_at": "2026-09-30 07:11:00",
+      "lag_days": 4
+    },
+    "audit_scope": {
+      "version": "7a7715be412c",
+      "generated_at": "2026-10-04 12:56:26",
+      "date_range_start": "2025-03-14",
+      "date_range_end": "2026-09-30",
+      "rules": [
+        "有效日期",
+        "核心字段",
+        "来源内正文去重",
+        "翻译覆盖"
+      ]
+    },
+    "source_comparison": {
+      "status": "available",
+      "matched_product_count": 16,
+      "sample_sizes": {
+        "OZON": 6097,
+        "Wildberries": 80358,
+        "Yandex Market": 214
+      },
+      "rating_comparison": {
+        "OZON": 4.51,
+        "Wildberries": 4.85,
+        "Yandex Market": 4.84
+      },
+      "limitations": "各来源样本来自匹配商品后的观察性数据，未进行随机分配。"
+    }
   },
   "wordcloud_positive": [
     {

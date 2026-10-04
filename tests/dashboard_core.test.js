@@ -40,3 +40,28 @@ test('buildGovernanceView preserves manifest and comparison evidence', () => {
   assert.equal(view.metrics[3].value, 6);
   assert.equal(view.comparison, comparison);
 });
+
+test('buildGovernanceView exposes dataset audit evidence and source coverage', () => {
+  const sourceCoverage = [
+    {platform: 'Wildberries', total: 20, latest_record_at: '2026-09-30 07:11:00'},
+    {platform: 'OZON', total: 5, latest_record_at: '2026-09-29 00:00:00'},
+  ];
+  const view = core.buildGovernanceView({
+    status: 'available',
+    evidence_source: 'published_dataset_audit',
+    run_manifest: {
+      input_rows: 25, accepted_rows: 25, quarantined_rows: 0,
+      duplicate_rows: 0, quality_pass_rate: 100,
+      quality_gate_status: 'passed',
+    },
+    source_coverage: sourceCoverage,
+    freshness: {latest_record_at: '2026-09-30 07:11:00', status: 'current'},
+    audit_scope: {version: 'abc1234', generated_at: '2026-10-04 12:00:00'},
+  });
+
+  assert.equal(view.available, true);
+  assert.equal(view.evidenceSource, 'published_dataset_audit');
+  assert.equal(view.sourceCoverage, sourceCoverage);
+  assert.equal(view.freshness.status, 'current');
+  assert.equal(view.auditScope.version, 'abc1234');
+});
